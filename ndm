@@ -1,0 +1,1011 @@
+#!/usr/bin/python3
+#
+# ndm - dhcp and dns host network config file manager for bind9 and isc-dhcp-server
+#
+
+import argparse
+import datetime
+import json
+import os
+import pwd
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+import uuid
+
+ndmversion = "0.9"
+# fns entries: '11hosts':hosts file, '21dhcpconf':dhcpd.conf, '22dhcpsubnet':dhcp-<subnet>.hosts,
+#              '31bindconf':named.conf.options, '32blockconf':ndm-bind-blocked.conf,
+#              '41domzone':domain-zone-file, '42revdomzone':reverse-zone-file, '43blockzone':db.ndm-blocked.zone
+#              '51dynzone':dyn-zone-file, '52revdynzone':dyn-reverse-zone-file
+#              
+# fns entry elements (initialized in mkfilenames):
+# full-filename(in system), file(sys).bak, filename(in tmp), runtime filehandle, site-flag, orig-copy-flag
+fnsname =  0
+fnsbak =   1
+fnstmp =   2
+fnhandle = 3
+fnsite =   4  # True=file handled by --site 
+fnorig =   5  # True=make copy of original file
+
+# pd points to an instance of this class. practically everywhere
+class pdat:
+    def __init__(self):
+        self.defaultconfigfile = "/etc/dbndm.json"
+        self.etc = "/etc"
+        self.tmp = "/tmp" #changed early in mktmpdir. Used by build and install
+        self.dhsrv = self.dnsrv = self.zdir = self.dhdir = self.nofile = self.leasedir = ""
+        self.binduser = self.bindrundir = self.bindconfdir = self.configfile = self.myip = ""
+        self.myuid = self.hostsadded = 0
+        self.parser = self.dbmodified = self.dump = False
+        self.fns = {}
+        self.db = {}
+        self.listformat = "{:<16} {:<17} {:<16} {:<16} {:<16} {}"
+        self.resolvconf = "name_servers=127.0.0.1\ndomain={}\nsearch_domains={}\nsearch_domains_append=dyn.{}\n"
+        self.initialize = '{"cfg":{"os":"", "domain":"local", "subnet":"", "subnetmask":"", "gateway":"", "timeserver":"",\
+        "dnsip":"", "dnsfqdn":"", "mxfqdn":"", "dhcplease":"86400", "dhcpsubnet":"","dnslistenport":"53", "myip":"",\
+        "servicewait":"5", "externaldns":"", "hostfqdn":"", "blockdomains":"", "bindinclude":"", "dhcpinclude":"",\
+        "dhcpglobalopt":"", "dhcphostopt":{}},"hosts":{},"cname":{}}'
+# Centos configuration not yet tested
+        self.osdetails = { 'raspbian': { "dhcpservice":"isc-dhcp-server", "bindservice":"bind9",\
+                                         "bindconfdir":"/etc/bind", "bindzonedir":"/etc/bind",\
+                                         "dhcpconfdir":"/etc/dhcp", "bindconffn":"named.conf.options",\
+                                         "bindrundir":"/var/cache/bind", "dhcpleasedir":"/var/lib/dhcp",\
+                                         "binduser":"bind", "dhcpduser":"root" },\
+                           'opensuse-leap': { "dhcpservice":"dhcpd", "bindservice":"named",\
+                                              "bindconfdir":"/etc", "bindzonedir":"/var/lib/named/master",\
+                                              "dhcpconfdir":"/etc", "bindconffn":"named.conf",\
+                                              "bindrundir":"/var/lib/named", "dhcpleasedir":"/var/lib/dhcp/db",
+                                              "binduser":"named", "dhcpduser":"dhcpd" },\
+                           'centos': { "dhcpservice":"dhcpd", "bindservice":"named",\
+                                              "bindconfdir":"/etc", "bindzonedir":"/var/named/master",\
+                                              "dhcpconfdir":"/etc/dhcp", "bindconffn":"named.conf",\
+                                              "bindrundir":"/var/named", "dhcpleasedir":"/var/lib/dhcpd",\
+                                              "binduser":"named", "dhcpduser":"dhcpd" }}
+        self.defaulthosts = {"127.0.0.1":"localhost", "::1":"localhost ipv6-localhost ipv6loopback",\
+                             "fe00::0":"ipv6-localnet", "ff00::0":"ipv6-mcastprefix",\
+                             "ff02::1":"ipv6-allnodes", "ff02::2":"ipv6-allrouters", "ff02::3":"ipv6-allhosts"}
+
+def perrorexit(msg):
+    print(msg)
+    quit()
+
+def qdelfile(fn):
+    try:
+        os.remove(fn)
+    except OSError:
+        pass
+
+def qrename(src, dst):
+    try:
+        os.rename(src, dst)
+    except OSError:
+        pass
+
+def mktmpdir(pd, args):
+    if args.tmp == None:
+        pd.tmp = "/tmp/ndm.{}".format(pwd.getpwuid(os.getuid())[0])
+        os.makedirs(pd.tmp, mode=0o700, exist_ok=True)
+    else:
+        pd.tmp = args.tmp
+    
+def ipinvert(ipaddr):
+    els = ipaddr.split(".")
+    return '.'.join([els[2], els[1], els[0]])
+    
+def ckconfig(pd, args):
+    ignore = ['dhcphostopt', 'dhcpglobalopt', 'hostfqdn', 'dnsip', 'blockdomains', 'subnetmask', 'bindinclude', 'dhcpinclude']
+    missing = ""
+    for i in pd.db['cfg']:
+        if not i in ignore:
+            if pd.db['cfg'][i] == "":
+                if missing != "":
+                    missing += ', ' + i
+                else:
+                    missing = i
+    if missing != "": perrorexit("? Configuration incomplete: {}".format(missing))
+
+def stopservices(pd, svcs):
+    print ("% Stopping services...")
+    for sv in svcs:
+        if svcs[sv]: os.system("systemctl stop {}.service".format(sv))
+
+def startservices(pd, svcs, fstatus):
+    print ("% Restarting services...")
+    for sv in svcs:
+        if svcs[sv]:
+            os.system("systemctl start {}.service".format(sv))
+            if fstatus: os.system("systemctl --no-pager status {}.service ".format(sv))
+    return True
+
+def stopstartservices(pd, svcs):
+    # stop and restart the services (if they are running already)
+    if not args.debug and (svcs[pd.dhsrv] or svcs[pd.dnsrv]):
+        stopservices(pd, svcs)
+        print ("% Waiting {} seconds".format(pd.db['cfg']['servicewait']))
+        for i in range(1, int(pd.db['cfg']['servicewait'])): time.sleep(1)
+        startservices(pd, svcs, True)
+    else:
+        if args.debug: print ("% Debug: Service status not modified")
+
+def writezheader(pd, fl, newdatesn, newftime, origin):
+    sorigin = "$ORIGIN {}.\n".format(origin) if origin != "" else ""
+    sdomain = "{}.".format(origin) if origin != "" else "@"
+    szname = origin if origin != "" else pd.db['cfg']['domain']
+    headstrings = ["; {} {} created {}\n".format(newdatesn, szname, newftime),\
+                   "$TTL	86400    ; 24 hours. could have been written as 24h or 1d\n",\
+                   sorigin,\
+                   "{}  IN    SOA {}. root.{}. (\n".format(sdomain, pd.db['cfg']['hostfqdn'], pd.db['cfg']['domain']),\
+                   "		     {} ; serial\n".format(newdatesn),\
+                   "		     28800      ; refresh 8H\n",\
+                   "		     7200       ; retry   2H\n",\
+                   "		     604800     ; expire  1W\n",\
+                   "		     86400      ; minimum 1D\n",\
+                   "		     )\n",\
+                   "       IN NS      {}.\n".format(pd.db['cfg']['dnsfqdn']),\
+                   "       IN MX      10 {}.\n".format(pd.db['cfg']['mxfqdn'])]
+    for s1 in headstrings:
+        if s1 != "": fl.write(s1)
+
+def writeblocklist(pd):
+    # Generate the file of blocked domains
+    with open(pd.fns['32blockconf'][fnstmp], 'w') as flb:
+        flb.write("// These domains are configured by ndm to be blocked by DNS\n\n")
+        if pd.db['cfg']['blockdomains'] != "":
+            els = pd.db['cfg']['blockdomains'].split(',')
+            for i in els:
+                flb.write('zone "{}" {{ type master; forwarders {{ }}; notify no; file "{}"; }};\n'.format(i.strip(), pd.fns['43blockzone'][fnsname]))
+
+def writedynconf(pd):
+    with open(pd.fns['51dynzone'][fnstmp], 'w') as flbh:
+        writezheader(pd, flbh, gendatesn(), datetime.datetime.strftime(datetime.datetime.now(), "%c"), "dyn.{}".format(pd.db['cfg']['domain']))
+    with open(pd.fns['52revdynzone'][fnstmp], 'w') as flbh:
+        writezheader(pd, flbh, gendatesn(), datetime.datetime.strftime(datetime.datetime.now(), "%c"), "{}.dhcp".format(ipinvert(pd.db['cfg']['subnet'])))
+    return True
+
+def writedhcpzone(pd, fl, zonename):
+    fl.write("zone {}. {{\n\
+    primary {};\n\
+    key dhcp-update;\n\
+    }}\n\n".format(zonename, pd.db['cfg']['dnsfqdn']))
+                
+def writedhcpconf(pd):
+    with open(pd.fns['21dhcpconf'][fnstmp], 'w') as fldh:
+        newftime = datetime.datetime.strftime(datetime.datetime.now(), "%c")
+        fldh.write("# dhcpd.conf created {}\n".format(newftime))
+        fldh.write("authoritative;\n")
+        fldh.write("option routers {};\n".format(pd.db['cfg']['gateway']))
+        fldh.write("option subnet-mask 255.255.255.0;\n")
+        fldh.write("default-lease-time {};\n".format(pd.db['cfg']['dhcplease']))
+        fldh.write("option time-servers {};\n".format(pd.db['cfg']['timeserver']))
+        fldh.write("option domain-name-servers {}, {};\n".format(pd.db['cfg']['dnsip'], pd.db['cfg']['externaldns']))
+        fldh.write("ddns-updates on;\nddns-update-style standard;\nignore client-updates;\nupdate-static-leases on;\n")
+        fldh.write("# What to do if the client sends no hostname: pick first possible string as hostname\n")
+        fldh.write('ddns-hostname = pick (option fqdn.hostname, option host-name, concat("dhcp-",binary-to-ascii (16,8,"-",substring (hardware,1,6))));')
+        fldh.write("\n")
+        fldh.write("key dhcp-update {{\n\
+    algorithm hmac-md5;\n\
+    secret {};\n\
+}}\n\n".format(pd.db['cfg']['dhcpkey']))
+        writedhcpzone(pd, fldh, "{}.dhcp".format(ipinvert(pd.db['cfg']['subnet'])))
+        writedhcpzone(pd, fldh, pd.db['cfg']['domain'])
+        writedhcpzone(pd, fldh, "dyn.{}".format(pd.db['cfg']['domain']))
+        if pd.db['cfg']['dhcpglobalopt'] != "": fldh.write("{}\n\n".format(pd.db['cfg']['dhcpglobalopt']))
+        fldh.write("subnet {}.0 netmask 255.255.255.0 {{\n".format(pd.db['cfg']['subnet']))
+        fldh.write('    option domain-search "{}", "dyn.{}";\n'.format(pd.db['cfg']['domain'], pd.db['cfg']['domain']))
+        fldh.write("    option broadcast-address {}.255;\n".format(pd.db['cfg']['subnet']))
+        fldh.write("    allow duplicates;\n")
+        fldh.write("    ddns-updates off;\n")
+        fldh.write("    pool {\n")
+        fldh.write("        ddns-updates on;\n")
+        fldh.write("        allow unknown-clients;\n")
+        fldh.write('        option domain-name "dyn.{}";\n'.format(pd.db['cfg']['domain']))
+        fldh.write('        ddns-rev-domainname "dhcp";\n')
+        fldh.write("        default-lease-time {};\n".format(pd.db['cfg']['dhcplease']))
+        fldh.write("        max-lease-time {};\n".format(pd.db['cfg']['dhcplease']))
+        fldh.write("        range {};\n".format(pd.db['cfg']['dhcpsubnet']))
+        fldh.write("    }\n}\n")
+        fldh.write('include "{}";\n'.format(pd.fns['22dhcpsubnet'][fnsname]))
+        if pd.db['cfg']['dhcpinclude'] != "":fldh.write('include "{}";\n'.format(pd.db['cfg']['dhcpinclude']))
+
+def writezonedef(pd, fl, zonename, zonefile):
+    fl.write('\nzone "{}" in {{\n\
+     type master;\n\
+     file "{}";\n\
+     allow-update {{ key dhcp-update; }};\n\
+     forwarders {{ }};\n\
+     notify no;\n\
+}};\n'.format(zonename, zonefile))
+
+def writebindconf(pd):
+    with open(pd.fns['31bindconf'][fnstmp], 'w') as fl:
+
+        fl.write('\n\
+// Consider adding the 1918 zones here, if they are not used in your\n\
+// organization\n\
+//include "/etc/bind/zones.rfc1918";\n\
+\n\
+    acl internals {{ 127.0.0.0/8; {}.0/24; }};\n\
+\n\
+options {{\n\
+    directory "{}";\n\
+    pid-file "/var/run/named/named.pid";\n\
+    session-keyfile "/var/run/named/session.key";\n\
+    listen-on port {} {{ {}; 127.0.0.1; }};\n\
+    listen-on-v6 {{ none; }};\n\
+    allow-query {{ internals; }};\n\
+    allow-query-cache {{ internals; }};\n\
+    allow-recursion {{ internals; }};\n\
+    forwarders {{ 1.1.1.1; 1.0.0.1; }};\n\
+}};\n\n'.format(pd.db['cfg']['subnet'], pd.bindrundir, pd.db['cfg']['dnslistenport'], pd.db['cfg']['myip']))
+
+        fl.write('\n\
+key dhcp-update {{\n\
+    algorithm hmac-md5;\n\
+    secret "{}";\n\
+}};\n\
+\n\
+logging {{\n\
+	category lame-servers {{ null; }};\n\
+	category edns-disabled {{ null; }};\n\
+	category resolver {{ null; }}; // this will kill resolver error msgs\n\
+}};\n\
+\n\
+controls {{\n\
+	 inet 127.0.0.1 allow {{ localhost; }} keys {{ rndc-key; }};\n\
+}};\n\n\
+include "{}/rndc.key";\n'.format(pd.db['cfg']['dhcpkey'], pd.bindconfdir))
+        # Domain and reverse domain statements
+        writezonedef(pd, fl, "{}.in-addr.arpa".format(ipinvert(pd.db['cfg']['subnet'])), "{}/db.{}".format(pd.zdir, pd.db['cfg']['subnet']))
+        writezonedef(pd, fl, "{}".format(pd.db['cfg']['domain']), "{}/db.{}".format(pd.zdir, pd.db['cfg']['domain']))
+        writezonedef(pd, fl, "{}.dhcp".format(ipinvert(pd.db['cfg']['subnet'])), "{}/db.{}.dhcp".format(pd.zdir, pd.db['cfg']['subnet']))
+        writezonedef(pd, fl, "dyn.{}".format(pd.db['cfg']['domain']), "{}/db.dyn.{}".format(pd.zdir, pd.db['cfg']['domain']))
+        fl.write('\ninclude "{}";\n'.format(pd.fns['32blockconf'][fnsname]))  # Include db.ndm-blocked
+        if pd.db['cfg']['bindinclude'] != "": fl.write('\ninclude "{}";\n'.format(pd.db['cfg']['bindinclude']))  # site-local include
+
+def gendatesn():
+    newdatesn = datetime.datetime.strftime(datetime.datetime.now(), "%Y%m%d")
+    # Get current serial number from current active zonefile
+    try:
+        with open(pd.fns['41domzone'][fnsname]) as f: line = f.readline()
+    except:
+        line = "; 2019041901 mydomain.net"
+    try:
+        cursn = line.split()[1][-2:]  # last 2 digits of s/n in file
+        t1 = int(cursn) +1
+        fdatesn = line.split()[1][0:8] # first 8 digits of s/n in file
+    except:
+        t1 = 1
+        cursn = fdatesn = "20190419"
+    if t1 > 99 or newdatesn != fdatesn: t1 = 1
+    newdatesn = newdatesn + "{:02d}".format(t1)
+    return newdatesn
+
+def mktsigkey(pd, args):
+    if not 'dhcpkey' in pd.db['cfg']:
+        tsigout = subprocess.check_output("tsig-keygen -a hmac-md5 -r /dev/urandom dhcp-update", shell=True)
+        for line in tsigout.decode('utf8').split("\n"):
+            if 'secret' in line:
+                pd.db['cfg']['dhcpkey'] = line.split('"')[1]
+                pd.dbmodified = True
+
+def doresolvconf(pd):
+    if not os.path.isfile("/etc/resolvconf.conf"): return True #Skip if needed
+    if not os.path.isfile("/etc/resolvconf.conf.ndm"):
+        print("% Saving /etc/resolvconf.conf as /etc/resolvconf.conf.ndm")
+        shutil.copy("/etc/resolvconf.conf", "/etc/resolvconf.conf.ndm")
+        print("% Writing new /etc/resolvconf.conf")
+        with open("/etc/resolvconf.conf", 'w') as rcf:
+            rcf.write(pd.resolvconf.format(pd.db['cfg']['domain'], pd.db['cfg']['domain'], pd.db['cfg']['domain']))
+        print("% Running resolvconf to create new /etc/resolv.conf")
+        rcresult = subprocess.check_output("resolvconf -u", shell=True)
+        for line in rcresult.decode('utf8'):
+            if line != "": print (line)
+
+def doheaders(pd, newdatesn):
+    newftime = datetime.datetime.strftime(datetime.datetime.now(), "%c")
+    # dns forward zone
+    writezheader(pd, pd.fns['41domzone'][fnhandle], newdatesn, newftime, pd.db['cfg']['domain'])
+    # dns reverse zone
+    writezheader(pd, pd.fns['42revdomzone'][fnhandle], newdatesn, newftime, "{}.in-addr.arpa".format(ipinvert(pd.db['cfg']['subnet'])))
+    # hosts file
+    flh = pd.fns['11hosts'][fnhandle]
+    flh.write("#/etc/hosts created {}\n#\n".format(newftime))
+    flh.write("# hosts         This file describes a number of hostname-to-address\n")
+    flh.write("#               mappings for the TCP/IP subsystem.  It is mostly\n")
+    flh.write("#               used at boot time, when no name servers are running.\n")
+    flh.write("#               On small systems, this file can be used instead of a\n")
+    flh.write("#               name server.\n# Syntax:\n#    \n")
+    flh.write("# IP-Address    {:<40} Short-Hostname\n#\n".format("Fully-Qualified-Hostname"))
+    
+def zonebuild(pd, args):
+    newdatesn = gendatesn()
+    for i in pd.fns:                      # delete old tmp files and open new files for writing
+        if not pd.fns[i][fnsite]:
+            qdelfile(pd.fns[i][fnstmp])
+            pd.fns[i][fnhandle] = open(pd.fns[i][fnstmp], 'w')
+    # read through the rest of network database file and generate config files
+    print ("% Creating zone '{}' for subnet '{}' s/n '{}'".format(pd.db['cfg']['domain'], pd.db['cfg']['subnet'], newdatesn))
+    doheaders(pd, newdatesn)
+    doallnodes(pd, buildnode, "")
+    rze = pd.db['cfg']['dhcpsubnet'].split(" ")
+    slow = rze[0].split('.')[3]
+    shigh = rze[1].split('.')[3]
+    pd.fns['42revdomzone'][fnhandle].write("\n$GENERATE {}-{} $ CNAME $.{}.dhcp.\n".format(slow, shigh, ipinvert(pd.db['cfg']['subnet'])))
+    for i in pd.fns:
+        if not pd.fns[i][fnsite]: pd.fns[i][fnhandle].close()
+    writeblocklist(pd)
+
+def zoneinstall(pd, args):
+    print ("% Installing files from tmp directory '{}' to system directories".format(pd.tmp))
+    for i in sorted(pd.fns):
+        if not pd.fns[i][fnsite]:
+            print("  {}...".format(pd.fns[i][fnsname]))
+            qdelfile(pd.fns[i][fnsbak])
+            qrename(pd.fns[i][fnsname], pd.fns[i][fnsbak])
+            shutil.copy(pd.fns[i][fnstmp], pd.fns[i][fnsname])
+    os.chmod(pd.zdir, 0o2775)
+
+def sitebuild(pd, args):
+    mktsigkey(pd, args) # Build DNS update key if needed
+    writebindconf(pd)
+    # Write blocked-domain.zone
+    with open(pd.fns['43blockzone'][fnstmp], 'w') as flbd:
+        writezheader(pd, flbd, gendatesn(), datetime.datetime.strftime(datetime.datetime.now(), "%c"), "")
+        flbd.write("@      IN A       127.0.0.1\n*      IN A       127.0.0.1\n")
+    # Write dhcpd.conf
+    writedhcpconf(pd)
+    writedynconf(pd)
+    return True
+
+def siteinstall(pd, args, svcs):
+    stopservices(pd, svcs)
+    print ("% Moving files from tmp directory '{}' to system directories".format(pd.tmp))
+    for i in sorted(pd.fns):
+        if pd.fns[i][fnsite]:
+            tfile = pd.fns[i][fnsname]
+            print("  {}...".format(tfile))
+            if pd.fns[i][fnorig]:
+                if not os.path.isfile("{}.orig".format(tfile)):
+                    qrename(tfile, "{}.orig".format(tfile))
+            qdelfile(pd.fns[i][fnsbak])
+            qrename(tfile, pd.fns[i][fnsbak])
+            shutil.copy(pd.fns[i][fnstmp], tfile)
+    doresolvconf(pd)
+#    subprocess.call("chown {}:{} {}".format(pd.binduser, pd.binduser, pd.zdir), shell=True)  # Verify if needed
+    if args.reset:
+        # Delete jnl files and dhcp lease files \\ where are the dhcp lease files?
+        qdelfile("{}.jnl".format(pd.fns['51dynzone'][fnsname]))
+        qdelfile("{}.jnl".format(pd.fns['52revdynzone'][fnsname]))
+        qdelfile("{}/dhcpd.leases".format(pd.leasedir))
+        qdelfile("{}/dhcpd.leases~".format(pd.leasedir))
+    startservices(pd, svcs, True)
+    return True
+
+def emithost(pd, eipaddr, ehost, fnormal):
+    if fnormal:  #Standard entry
+        if ehost == "": return
+        emac = pd.db['hosts'][eipaddr]['hostname'][ehost]['macaddr']
+        eopts = pd.db['hosts'][eipaddr]['hostname'][ehost]['flags']
+        dhcphostopts = pd.db['hosts'][eipaddr]['dhcphostopt']
+        # dhcpd.conf
+        if (emac != "") and not ("nodhcp" in eopts) and not ("hostsonly" in eopts) and not ("zoneonly" in eopts):
+            s1 = "host {} {{\n    hardware ethernet {};\n    fixed-address {};\n".format(ehost, emac, eipaddr)
+            if dhcphostopts != "":
+                els = dhcphostopts.split(',')
+                for o in els:
+                    if (o in pd.db['cfg']['dhcphostopt']) and (pd.db['cfg']['dhcphostopt'][o] != ""):
+                        s1 = "{}    {}\n".format(s1, pd.db['cfg']['dhcphostopt'][o])
+                    else:
+                        print("% No dhcphostopt config found for option '{}' for host '{}'...ignoring".format(o, ehost))
+            s1 = '{}    option host-name "{}";\n    ddns-hostname "{}";\n'.format(s1, ehost, ehost)
+            pd.fns['22dhcpsubnet'][fnhandle].write("{}    }}\n\n".format(s1))
+        # domain forward file
+        if not ("hostsonly" in eopts) and not ("dhcponly" in eopts):
+            s1 = "{:<15} IN A     {}\n".format(ehost, eipaddr)
+            pd.fns['41domzone'][fnhandle].write(s1)
+        # domain reverse file
+        if not ("hostsonly" in eopts) and not ("zoneonly" in eopts) and not ("dhcponly" in eopts):
+            pd.fns['42revdomzone'][fnhandle].write("{:<3} IN PTR {}.{}.\n".format(eipaddr.split('.')[fnhandle], ehost, pd.db['cfg']['domain']))
+        # hosts
+        if not ("zoneonly" in eopts) and not ("dhcponly" in eopts):
+            if ("nodomain" in eopts):
+                s1 = "{:<15} {:<40}\n".format(eipaddr, ehost)
+            else:
+                s2 = "{}.{}".format(ehost, pd.db['cfg']['domain'])
+                s1 = "{:<15} {:<40} {}\n".format(eipaddr, s2, ehost)
+            pd.fns['11hosts'][fnhandle].write(s1)
+    else:  #If not standard, treat as CNAME
+        pd.fns['41domzone'][fnhandle].write("{:<15} IN CNAME {}\n".format(eipaddr, ehost))
+
+def addhost(pd, eipaddr, emac, edhcphostopt, ehost, eopts, enote):
+    if "cname" in eopts:
+        pd.db['cname'][eipaddr] = ehost
+    else:
+        if not eipaddr in pd.db['hosts']:
+            pd.db['hosts'][eipaddr] = {'hostname':{ehost:{'macaddr':emac, 'flags':eopts, 'note':enote}}, 'dhcphostopt':edhcphostopt }
+        else:
+            pd.db['hosts'][eipaddr]['hostname'][ehost] = {'macaddr':emac, 'flags':eopts, 'note':enote}
+    pd.dbmodified = True
+    return True
+
+def setosdirs(pd, args):           # Get OS-specific filenames into well-known location
+    os = pd.db['cfg']['os']
+    pd.dhsrv = pd.osdetails[os]['dhcpservice']
+    pd.dnsrv = pd.osdetails[os]['bindservice']
+    pd.zdir = pd.osdetails[os]['bindzonedir']
+    pd.dhdir = pd.osdetails[os]['dhcpconfdir']
+    pd.leasedir = pd.osdetails[os]['dhcpleasedir']
+    pd.nofile = pd.osdetails[os]['bindconffn']
+    pd.bindconfdir = pd.osdetails[os]['bindconfdir']
+    pd.bindrundir = pd.osdetails[os]['bindrundir']
+    pd.binduser = pd.osdetails[os]['binduser']
+
+def getostype(pd, args):
+    if pd.db['cfg']['os'] == "":
+        try:
+            with open("/etc/os-release") as f:
+                for line in f:
+                    els = line.split('=')
+                    if els[0] == "ID":
+                        ostype = els[1].rstrip()
+                        break
+        except:
+            ostype = ""
+        if args.os != None: ostype = args.os
+        ostype = ostype.replace('"','').lower()
+        if ostype == "":
+            perrorexit ("? No OS ID information found in /etc/os-release and --os not specified")
+        for knownos in pd.osdetails:
+            if knownos in ostype:
+                pd.db['cfg']['os'] = knownos
+                setosdirs(pd, args)
+                pd.dbmodified = True
+                break
+        else:
+            perrorexit("? Unknown OS '{}'".format(pd.ostype))
+
+def buildnode(pd, keyname, listfmt):
+    if keyname in pd.db['hosts']:
+        for hname in pd.db['hosts'][keyname]['hostname']:
+            emithost(pd, keyname, hname, True)
+    else:
+        if keyname in pd.db['cname']:
+            emithost(pd, keyname, pd.db['cname'][keyname], False)
+
+def printnode1(pd, keyname, hname, printfmt):
+    print(printfmt.format(keyname, pd.db['hosts'][keyname]['hostname'][hname]['macaddr'],\
+                          hname, pd.db['hosts'][keyname]['hostname'][hname]['flags'],\
+                          pd.db['hosts'][keyname]['hostname'][hname]['note'], pd.db['hosts'][keyname]['dhcphostopt']))
+    
+def printnode(pd, keyname, printfmt):
+    if keyname in pd.db['hosts']:
+        for hname in sorted(pd.db['hosts'][keyname]['hostname']):
+            printnode1(pd, keyname, hname, printfmt)
+    else:
+        if keyname in pd.db['cname']:
+            print(pd.listformat.format(keyname, pd.db['cname'][keyname], "", "+cname", "", ""))
+            
+def listnodeprint(pd, keyname, listfmt):
+    printnode(pd, keyname, listfmt)
+
+def doallnodes(pd, dofunc, listfmt):
+    lowoct = []
+    for keyname in pd.db['hosts']:
+        if pd.db['cfg']['subnet'] in keyname:
+            j = int(keyname.split(".")[3])
+            if not j in lowoct: lowoct.append(j)
+    # Do the addresses in the subnet
+    for i in sorted(lowoct):
+        keyname = "{}.{}".format(pd.db['cfg']['subnet'], i)
+        dofunc(pd, keyname, listfmt)
+    # Do not-in-our-subnet addresses, etc.
+    for keyname in sorted(pd.db['hosts']):
+        if not pd.db['cfg']['subnet'] in keyname:
+            dofunc(pd, keyname, listfmt)
+    # Do CNAMEs
+    for keyname in sorted(pd.db['cname']):
+        dofunc(pd, keyname, pd.listformat)
+    return True
+
+def listnormal(thestring, sepchar):
+    s1 = re.sub(' +', ' ', thestring.strip())  # Replace multiple spaces with a single space
+    slist = s1.split(",")
+    if len(slist) == 1: slist = s1.split(" ")  # If it wasn't comma-separated, it must be space-separated
+    outstring = slist[0]
+    if len(slist) <= 1: return outstring
+    for i in range(1,len(slist)):
+        outstring = "{}{}{}".format(outstring, sepchar, slist[i].strip())
+    return outstring
+
+def mkfilenames(pd, args):
+    if args.tmp != None: pd.tmp = args.tmp
+    bak = '.bak'
+    dhfn = "dhcpd.conf"
+    zfn = "db.{}".format(pd.db['cfg']['domain'])
+    rzfn = "db.{}".format(pd.db['cfg']['subnet'])
+    hfn = "hosts"
+    bzfn = "db.ndm-blocked.zone"
+    blfn = "ndm-bind-blocked.conf"
+    dzfn = "subnet-{}.hosts".format(pd.db['cfg']['subnet'])
+    dyfn = "db.dyn.{}".format(pd.db['cfg']['domain'])
+    rdyfn = "db.{}.dhcp".format(pd.db['cfg']['subnet'])
+    fnsfmt = "{}/{}"
+    xdhfile = fnsfmt.format(pd.dhdir, dhfn)
+    xdzfile = fnsfmt.format(pd.dhdir, dzfn)
+    xzfile = fnsfmt.format(pd.zdir, zfn)
+    xrzfile = fnsfmt.format(pd.zdir, rzfn)
+    xbzfile = fnsfmt.format(pd.zdir, bzfn)
+    xnofile = fnsfmt.format(pd.bindconfdir, pd.nofile)
+    xblfile = fnsfmt.format(pd.bindconfdir, blfn)
+    xhfile = fnsfmt.format(pd.etc, hfn)
+    xdynfile = fnsfmt.format(pd.zdir, dyfn)
+    xrdynfile = fnsfmt.format(pd.zdir, rdyfn)
+#          file(sys), file(sys).bak, file(tmp), runtime filehandle, Site-flag
+    pd.fns = { '11hosts':     [xhfile,  xhfile+bak,  pd.tmp+'/'+hfn,       None, False, True],\
+               '21dhcpconf':  [xdhfile, xdhfile+bak, pd.tmp+'/'+dhfn,      None, True,  True],\
+               '22dhcpsubnet':[xdzfile, xdzfile+bak, pd.tmp+'/'+dzfn,      None, False, False],\
+               '31bindconf':  [xnofile, xnofile+bak, pd.tmp+'/'+pd.nofile, None, True,  True],\
+               '32blockconf': [xblfile, xblfile+bak, pd.tmp+'/'+blfn,      None, False, False],\
+               '41domzone':   [xzfile,  xzfile+bak,  pd.tmp+'/'+zfn,       None, False, False],\
+               '42revdomzone':[xrzfile, xrzfile+bak, pd.tmp+'/'+rzfn,      None, False, False],\
+               '43blockzone': [xbzfile, xbzfile+bak, pd.tmp+'/'+bzfn,      None, True,  False],\
+               '51dynzone':   [xdynfile, xdynfile+bak, pd.tmp+'/'+dyfn,    None, True,  False],\
+               '52revdynzone':[xrdynfile, xrdynfile+bak,pd.tmp+'/'+rdyfn,  None, True,  False]}
+
+def dbloadfile(pd, args, ckcfg):
+    if args.db == None:
+        pd.configfile = pd.defaultconfigfile
+    else:
+        pd.configfile = args.db
+
+    if not pd.configfile.endswith(".json"):
+        pd.configfile = "{}.json".format(pd.configfile)
+
+    if args.create:
+        if os.path.isfile(pd.configfile): perrorexit("? File {} already exists".format(pd.configfile))
+        pd.db = json.loads(pd.initialize)
+        for ip in pd.defaulthosts: addhost(pd, ip, "", "", pd.defaulthosts[ip],"+hostsonly+nodomain", "")
+        pd.dbmodified = True
+    else:
+        try:
+            with open(pd.configfile, 'r') as dbf:
+                try:
+                    pd.db = json.load(dbf)
+                except ValueError:
+                    perrorexit("? Network database {} has invalid syntax".format(pd.configfile))
+        except:
+            perrorexit("? Unable to open network database {}".format(pd.configfile))
+    if ckcfg: ckconfig(pd, args)
+    if pd.db['cfg']['hostfqdn'] == "":
+        pd.db['cfg']['hostfqdn'] = socket.getfqdn()
+        pd.dbmodified = True
+    try:
+        if pd.db['cfg']['myip'] == "":
+            if args.myip != None: pd.db['cfg']['myip'] = args.myip
+        # When first setting up, the socket call can return 127.0.0.1, which is wrong, or raise an exception. Depends on how /etc/hosts is set up
+        if pd.db['cfg']['myip'] == "": pd.db['cfg']['myip'] = socket.gethostbyname(socket.getfqdn())
+    except:
+        pd.db['cfg']['myip'] = "127.0.0.1"
+    if pd.db['cfg']['myip'].startswith("127.0"): perrorexit("? Cannot get our IP address; please use 'ndm config --create --myip my.ip.ad.dr'")
+        # If my MAC address ever comes out wrong, this magic is the cause!
+    if args.create: addhost(pd, pd.db['cfg']['myip'],\
+                            ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff) for ele in range(0,8*6,8)][::-1]),\
+                            "", pd.db['cfg']['hostfqdn'].split('.')[0], "", "")
+    if (pd.db['cfg']['dnsip'] == "") or (pd.db['cfg']['dnsip'].startswith("127.0")):
+        pd.db['cfg']['dnsip'] = pd.db['cfg']['myip']
+        pd.dbmodified = True
+
+def dbdumpfile(pd, args):
+    if not pd.dbmodified: return True
+    tmpf = pd.configfile + '.tmp'
+    bakf = pd.configfile + '.bak'
+    try:
+        with open(tmpf, 'w') as dbf:
+            json.dump(pd.db, dbf, indent=4, sort_keys=True)
+            dbf.write("\n") #Final eol
+    except:
+        perrorexit("? Error writing '{}'".format(tmpf))
+    qdelfile(bakf)
+    qrename(pd.configfile, bakf)
+    qrename(tmpf, pd.configfile)
+
+def importdbtxt(pd, args):
+    try:
+        ifl = open(args.importnet, 'r')
+    except:
+        perrorexit("? Cannot find import file '{}'".format(args.importnet))
+    for line in ifl:
+        if line.split('#')[0] == "": continue        # ignore comment lines
+        if "CONFIG=" in line:
+            els = line.rstrip().split('=')
+            pd.db = json.loads(els[1])
+        else:
+            line = line.split('#')[0].rstrip() + ',,,,,' # Extra commas guard against missing stuff on line
+            # Split and get parts: IPAddr[0], macaddr[1], hostname[2], flags[3], note[4], dhcphostopt[5]
+            els = line.split(',')
+            pd.hostsadded += 1
+            addhost(pd, els[0], els[1], els[5], els[2].lower(), els[3], els[4])
+            if args.verbose: printnode1(pd, els[0], els[2], pd.listformat)
+    ifl.close()
+    print("% Added/updated {} hosts".format(pd.hostsadded))
+    return True    
+
+def hostknown(pd, hostname):
+    for ip in pd.db['hosts']:
+        if hostname in pd.db['hosts'][ip]['hostname']:
+            return ip
+    return ""
+
+def getmodifyhostname(pd, args, keyname, hname, withwhat):
+    if len(pd.db['hosts'][keyname]['hostname']) > 1:
+        s1 = "" if withwhat == "" else "with {}".format(withwhat)
+        if hname == "": perrorexit("? {} has multiple hosts; --hostname must be specified {}".format(keyname, s1))
+        if not hname in pd.db['hosts'][keyname]['hostname']: perrorexit("? Hostname '{}' is not assigned to IP {}".format(hname, keyname))
+        return hname
+    else:
+        return list(pd.db['hosts'][keyname]['hostname'].keys())[0] #Fetch solitary hostname
+
+def chrootconfig(pd, args):
+    # From https://wiki.debian.org/Bind9
+    # Change /etc/default/bind9 OPTIONS="-u bind -t /var/bind9/chroot"
+    if os.path.isdir("/var/bind9/chroot"): perrorexit("? chroot appears to already be established")
+    subprocess.call('sed -i \'s/OPTIONS="-u bind"/OPTIONS="-u bind -t \/var\/bind9\/chroot"/\' /etc/default/bind9', shell=True)
+    for dir in [ "etc", "dev", "var/cache/bind", "var/run/named" ]:
+        subprocess.call("mkdir -p /var/bind9/chroot/{}".format(dir), shell=True)
+    os.chmod("/var/bind9/chroot/etc", 0o2775)    # Needed for dynamic updates (.jnl files)
+    subprocess.call("mknod /var/bind9/chroot/dev/null c 1 3 ; chmod 666 /var/bind9/chroot/dev/null", shell=True)
+    subprocess.call("mknod /var/bind9/chroot/dev/random c 1 8 ; chmod 666 /var/bind9/chroot/dev/random", shell=True)
+    subprocess.call("mknod /var/bind9/chroot/dev/urandom c 1 9 ; chmod 666 /var/bind9/chroot/dev/urandom", shell=True)
+    subprocess.call("mv /etc/bind /var/bind9/chroot/etc", shell=True)
+    subprocess.call("ln -s /var/bind9/chroot/etc/bind /etc/bind", shell=True)
+    subprocess.call("cp /etc/localtime /var/bind9/chroot/etc/", shell=True)
+#    subprocess.call("chown bind:bind /var/bind9/chroot/etc/bind/rndc.key", shell=True) # Not needed. Done during bind install
+    for dir in [ "cache/bind", "run/named" ]:
+        subprocess.call("chmod 775 /var/bind9/chroot/var/{}; chgrp bind /var/bind9/chroot/var/{}".format(dir, dir), shell=True)
+    if os.path.isdir("/etc/rsyslog.d"):
+        if not os.path.isfile("/etc/rsyslog.d/bind-chroot.conf"):
+            subprocess.call('echo "\$AddUnixListenSocket /var/bind9/chroot/dev/log" > /etc/rsyslog.d/bind-chroot.conf', shell=True)
+    return True
+
+def cmd_add(pd, args):
+# Add new entry. What about * entries    
+    dbloadfile(pd, args, True)
+    keyname = args.ip
+    if keyname is None: perrorexit("? IP address must be provided")
+    if args.hostname is None: perrorexit("? --hostname must be provided")
+    args.hostname = args.hostname.lower()
+    theip = hostknown(pd, args.hostname)
+    if theip != "": perrorexit("? Hostname '{}' is already assigned to IP {}".format(args.hostname, theip))
+    eopts = ""
+    if args.nodhcp: eopts += "+nodhcp"
+    if args.dhcponly: eopts += "+dhcponly"
+    if args.hostsonly: eopts += "+hostsonly"
+    if args.zoneonly: eopts += "+zoneonly"
+    if args.cname: eopts += "+cname+zoneonly"
+    if args.nodomain: eopts += "+nodomain"
+    if args.note == None: args.note = ""
+    if args.dhcphostopt == None: args.dhcphostopt = ""
+    if args.mac == None: args.mac = ""
+    addhost(pd, keyname, args.mac, args.dhcphostopt, args.hostname, eopts, args.note)
+    dbdumpfile(pd, args)
+    return True
+
+def cmd_build(pd, args):
+    dbloadfile(pd, args, True)
+    setosdirs(pd, args)
+    mktmpdir(pd, args)
+    mkfilenames(pd, args)
+    # currently build doesn't set pd.modifed, so these don't get saved
+    # This enables build command settings to override config
+    if args.bindinclude != None: pd.db['cfg']['bindinclude'] = args.bindinclude
+    if args.dhcpinclude != None: pd.db['cfg']['dhcpinclude'] = args.dhcpinclude
+    if not args.site:
+        zonebuild(pd, args)
+    else:
+        sitebuild(pd, args)
+    print("% Build completed into tmp directory '{}'".format(pd.tmp))
+    dbdumpfile(pd, args)
+    return True
+
+def cmd_config(pd, args):
+    dbloadfile(pd, args, False)
+    getostype(pd, args)
+    if args.domain != None: pd.db['cfg']['domain'] = args.domain.lower()
+    if args.subnet != None:
+        sn = args.subnet.split('/')
+        if len(sn) > 1:
+            if sn[1] != "":
+                if sn[1] != "24":
+                    perrorexit("? Only /24 networks currently supported")
+                pd.db['cfg']['subnetmask'] = sn[1] # Needs more work
+        pd.db['cfg']['subnet'] = sn[0]
+    if args.gateway != None: pd.db['cfg']['gateway'] = args.gateway
+    if args.timeserver != None: pd.db['cfg']['timeserver'] = args.timeserver
+    if args.dnsip != None: pd.db['cfg']['dnsip'] = args.dnsip
+    if args.dnsfqdn != None: pd.db['cfg']['dnsfqdn'] = args.dnsfqdn.lower()
+    if args.mxfqdn != None: pd.db['cfg']['mxfqdn'] = args.mxfqdn.lower()
+    if args.hostfqdn != None: pd.db['cfg']['hostfqdn'] = args.hostfqdn.lower()
+    if args.myip != None: pd.db['cfg']['myip'] = args.myip
+    if args.dhcplease != None: pd.db['cfg']['dhcplease'] = args.dhcplease
+    if args.servicewait != None: pd.db['cfg']['servicewait'] = args.servicewait
+    if args.externaldns != None: pd.db['cfg']['externaldns'] = args.externaldns
+    if args.dhcpsubnet != None: pd.db['cfg']['dhcpsubnet'] = args.dhcpsubnet
+    if args.dnslistenport != None: pd.db['cfg']['dnslistenport'] = args.dnslistenport
+    if args.dhcpglobalopt != None: pd.db['cfg']['dhcpglobalopt'] = args.dhcpglobalopt
+    if args.dhcphostopt != None:
+        els = args.dhcphostopt.split("=")
+        if els[1] == "":
+            del(pd.db['cfg']['dhcphostopt'][els[0]])
+        else:
+            if not els[1].endswith(';'): els[1] = "{};".format(els[1])
+            pd.db['cfg']['dhcphostopt'][els[0]] = els[1]
+    if args.blockdomains != None: pd.db['cfg']['blockdomains'] = listnormal(args.blockdomains.lower(), ", ")
+    if (args.domain != None) or (args.subnet != None) or (args.gateway != None) or (args.timeserver != None)\
+       or (args.dnsip != None) or (args.dnsfqdn != None) or (args.mxfqdn != None) or (args.dhcplease != None)\
+       or (args.servicewait != None) or (args.externaldns != None) or (args.dhcpsubnet != None)\
+       or (args.dhcphostopt != None) or (args.blockdomains != None)\
+       or (args.dnslistenport != None) or (args.myip != None)\
+       or (args.dhcpglobalopt != None) or (args.hostfqdn != None): pd.dbmodified = True
+
+    # Normalize externaldns and dhcpsubnet for their usage (different syntax between them!)
+    if pd.db['cfg']['externaldns'] != "": pd.db['cfg']['externaldns'] = listnormal(pd.db['cfg']['externaldns'], ", ") # comma-separated
+    if pd.db['cfg']['dhcpsubnet'] != "":  pd.db['cfg']['dhcpsubnet'] = listnormal(pd.db['cfg']['dhcpsubnet'],   " ")  # space-separated
+
+    if not pd.dbmodified and (args.importnet == None): args.list = True
+    if args.importnet != None:
+        importdbtxt (pd, args)
+    elif args.list:
+        for i in sorted(pd.db['cfg']):
+            if i != 'dhcphostopt': print("{:<15} {}".format(i, pd.db['cfg'][i]))
+        if len(pd.db['cfg']['dhcphostopt']) > 0:
+            print("DHCP per-host options")
+            for i in pd.db['cfg']['dhcphostopt']:
+                print("  {:<10} {}".format(i, pd.db['cfg']['dhcphostopt'][i]))
+    dbdumpfile(pd, args)
+    return True
+
+def cmd_delete(pd, args):
+    dbloadfile(pd, args, True)
+    keyname = args.ip
+    if keyname is None: perrorexit("? No IP address specified")
+    if keyname in pd.db['hosts']:
+        print("% Deleting IP address {}".format(keyname))
+        del pd.db['hosts'][keyname]
+    else:
+        if keyname in pd.db['cname']:
+            print("% Deleting CNAME '{}'".format(keyname))
+            del pd.db['cname'][keyname]
+        else:
+            perrorexit("? IP address {} is not in the database".format(keyname))
+    pd.dbmodified = True
+    dbdumpfile(pd, args)
+    return True
+
+def dodiff(pd, fnm, fpager):
+    if not fpager:
+        print("\n*** <<{} | {}>> ***\n\n".format(pd.fns[fnm][fnsname], pd.fns[fnm][fnstmp]))
+    s1 = "" if fpager is False else "| less"
+    subprocess.call("diff {} {} {}".format(pd.fns[fnm][fnsname], pd.fns[fnm][fnstmp], s1), shell=True)
+
+def cmd_diff(pd, args):
+    dbloadfile(pd, args, True)
+    setosdirs(pd, args)
+    mktmpdir(pd, args)
+    mkfilenames(pd, args)
+    for fnm in sorted(pd.fns):
+        if args.site:
+            if pd.fns[fnm][fnsite]: dodiff(pd, fnm, args.pager)
+        else:
+            if not pd.fns[fnm][fnsite]: dodiff(pd, fnm, args.pager)
+
+def cmd_install(pd, args):
+    if pd.myuid != 0: perrorexit("? You must be root to Install")
+    dbloadfile(pd, args, True)
+    setosdirs(pd, args)
+    mktmpdir(pd, args)
+    mkfilenames(pd, args)
+    svcs = { pd.dhsrv:(os.system("systemctl --quiet is-active {}.service".format(pd.dhsrv)) == 0),\
+             pd.dnsrv:(os.system("systemctl --quiet is-active {}.service".format(pd.dnsrv)) == 0) }
+    if args.chroot:
+        if pd.db['cfg']['os'] != "raspbian": perrorexit("? --chroot not supported on '{}'".format(pd.db['cfg']['os']))
+        if svcs[pd.dnsrv]: perrorexit("? Please 'systemctl stop bind9' before applying --chroot")
+        return chrootconfig(pd, args)
+    if args.reset:
+        zonebuild(pd, args)
+        stopservices(pd, svcs)
+        zoneinstall(pd, args)
+        siteinstall(pd, args, svcs)
+    else:
+        if not args.site:
+            zoneinstall(pd, args)
+            stopstartservices(pd, svcs)
+        else:
+            siteinstall(pd, args, svcs)
+    return True
+
+def cmd_list(pd, args):
+    dbloadfile(pd, args, True)
+    pd.dump = args.dump
+    if pd.dump:
+        cfg = json.dumps(pd.db['cfg'])
+        print('CONFIG={{"cfg":{}}}'.format(cfg))
+    listfmt = "{},{},{},{},{},{}," if pd.dump else pd.listformat
+    doallnodes(pd, listnodeprint, listfmt)
+    return True
+
+def cmd_modify(pd, args):
+    dbloadfile(pd, args, True)
+    keyname = args.ip
+    if keyname is None: perrorexit("? --ip must be provided")
+    if not keyname in pd.db['hosts']: perrorexit("? IP address {} is not in the database".format(keyname))
+    newname = args.newhostname.lower() if args.newhostname != None else ""
+    hname = args.hostname.lower() if args.hostname != None else ""
+    if newname != "":
+        hname = getmodifyhostname(pd, args, keyname, hname, "renaming a host")
+        theip = hostknown(pd, newname)
+        if theip != "":  perrorexit("? Hostname '{}' is already assigned to IP {}".format(newname, theip))
+        # Create new hostname (and copy flags and note), and then delete the old one
+        pd.db['hosts'][keyname]['hostname'][newname] = {'flags':pd.db['hosts'][keyname]['hostname'][hname]['flags'],\
+                                                        'macaddr':pd.db['hosts'][keyname]['hostname'][hname]['macaddr'],\
+                                                        'note':pd.db['hosts'][keyname]['hostname'][hname]['note']}
+        del(pd.db['hosts'][keyname]['hostname'][hname])
+        hname = newname
+    if args.note != None:
+        hname = getmodifyhostname(pd, args, keyname, hname, "--note")
+        pd.db['hosts'][keyname]['hostname'][hname]['note'] = args.note
+    if args.mac != None:
+        hname = getmodifyhostname(pd, args, keyname, hname, "--mac")
+        pd.db['hosts'][keyname]['hostname'][hname]['macaddr'] = args.mac.lower()
+    if args.dhcphostopt != None: pd.db['hosts'][keyname]['dhcphostopt'] = args.dhcphostopt
+    pd.dbmodified = True
+    dbdumpfile(pd, args)
+    return True
+
+def cmd_show(pd, args):
+    dbloadfile(pd, args, True)
+    ihost = args.host.lower()
+    if ihost in pd.db['hosts']:         # Print specific IP address if found
+        printnode(pd, ihost, pd.listformat)
+    else:
+        # See if a hostname,  MAC address, or hostname abbreviation specified
+        for keyname in sorted(pd.db['hosts']):
+            if ihost in pd.db['hosts'][keyname]['hostname']:
+                printnode1(pd, keyname, ihost, pd.listformat)
+            else:
+                for hname in sorted(pd.db['hosts'][keyname]['hostname']):
+                    if ihost in pd.db['hosts'][keyname]['hostname'][hname]['macaddr']:
+                        printnode1(pd, keyname, hname, pd.listformat)
+                    else:
+                        if ihost in hname:
+                            printnode1(pd, keyname, hname, pd.listformat)
+        # Lastly look at cnames
+        for keyname in pd.db['cname']:
+            if ihost in keyname:
+                printnode(pd, keyname, pd.listformat)
+    return True
+
+def cmd_help(pd, args):
+    print("\nndm builds the dhcp and named/bind configuration files from a database\n\
+maintained in a JSON-formatted configuration file.\n\
+\n\
+Use the 'ndm build' command to generate the service configuration files.\n\
+Use the 'ndm install' command to install the service configuration files\n\
+into the system and restart the services.\n\n")
+    pd.parser.print_help(None)
+    print("\nUse 'ndm command --help' for help on a specific command\n")
+    
+pd = pdat()
+pd.myuid = os.getuid()
+
+pd.parser = argparse.ArgumentParser(
+    prog = 'ndm',
+    description = "Build and install bind/dhcpd config files from database",
+    epilog="",
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+pd.parser.set_defaults(func=cmd_help, service="None") # test if needed
+
+subparsers = pd.parser.add_subparsers(help="sub-command help")
+# create=False on all subcommands except config. tmp=None on all subcommands except build, install, and diff. Makes code flows simpler
+subparser_add = subparsers.add_parser("add", help="Add a new host to the database")
+subparser_add.add_argument("ip", help="New host IP address")
+subparser_add.add_argument("--cname", help="Put this entry in DNS zone files as a CNAME", action='store_true')
+subparser_add.add_argument("--db", help="Specify alternate config file")
+subparser_add.add_argument("--dhcphostopt", help="Name of dhcphostopt to add to this host's dhcp entry")
+subparser_add.add_argument("--dhcponly", help="Only put this host in dhcpd.conf (no hosts or DNS config entries)", action='store_true')
+subparser_add.add_argument("--hostname", help="New host name")
+subparser_add.add_argument("--hostsonly", help="Only put this host in hosts file (no dhcpd.conf or DNS zone entries)", action='store_true')
+subparser_add.add_argument("--mac", help="MAC address for new hostname")
+subparser_add.add_argument("--nodhcp", help="Don't add host to dhcpd.conf", action='store_true')
+subparser_add.add_argument("--nodomain", help="Don't add the domain name to this entry; It's already fully qualified", action='store_true')
+subparser_add.add_argument("--note", help="Note text for new hostname")
+subparser_add.add_argument("--zoneonly", help="Only put thishost in DNS config files (no dhcpd.conf or hosts file)", action='store_true')
+subparser_add.set_defaults(func=cmd_add, create=False, tmp=None)
+
+subparser_build = subparsers.add_parser("build", help="Build new host databases in tmp staging area")
+subparser_build.add_argument("--bindinclude", help="Specify an additional bind include file")
+subparser_build.add_argument("--db", help="Specify alternate config file")
+subparser_build.add_argument("--dhcpinclude", help="Specify an additional dhcp include file")
+subparser_build.add_argument("--site", help="Build the bind/dhcp configuration files (See docs)", action='store_true')
+subparser_build.add_argument("--tmp", help="Directory for the the generated files")
+subparser_build.set_defaults(func=cmd_build, create=False)
+
+subparser_config = subparsers.add_parser("config", help="Manage configuration database")
+subparser_config.add_argument("--bindinclude", help="Specify an additional bind include file")
+subparser_config.add_argument("--blockdomains", help="Comma-separated list of domains to block")
+subparser_config.add_argument("--create", help="Create the Network DB file", action='store_true')
+subparser_config.add_argument("--db", help="Specify alternate config file")
+subparser_config.add_argument("--dhcpinclude", help="Specify an additional bind include file")
+subparser_config.add_argument("--dhcpglobalopt", help="Set the global DHCP option string")
+subparser_config.add_argument("--dhcphostopt", help="Set a DHCP per-host option string")
+subparser_config.add_argument("--dhcplease", help="DHCP lease length in seconds [86400]")
+subparser_config.add_argument("--dhcpsubnet", help="Low and High IP addresses for DHCP server pool")
+subparser_config.add_argument("--dnsfqdn", help="DNS server FQDN")
+subparser_config.add_argument("--dnsip", help="DNS server IP address")
+subparser_config.add_argument("--dnslistenport", help="Port for DNS Listen")
+subparser_config.add_argument("--domain", help="Domain name")
+subparser_config.add_argument("--externaldns", help="External DNS Servers")
+subparser_config.add_argument("--gateway", help="Network gateway")
+subparser_config.add_argument("--hostfqdn", help="My host FQDN")
+config_addil = subparser_config.add_mutually_exclusive_group()
+config_addil.add_argument("--importnet", help="Import a file of hosts")
+config_addil.add_argument("--list", help="Show the current configuration", action='store_true')
+subparser_config.add_argument("--mxfqdn", help="Mail server FQDN")
+subparser_config.add_argument("--myip", help="Specify my IP address if I need help")
+subparser_config.add_argument("--os", help="Specify OS type if /etc/os-release fails")
+subparser_config.add_argument("--servicewait", help="Delay time between service stop and start")
+subparser_config.add_argument("--subnet", help="Network subnet")
+subparser_config.add_argument("--timeserver", help="Time server IP address")
+subparser_config.add_argument("--verbose", help="List each entry imported with --importnet",action='store_true')
+subparser_config.set_defaults(func=cmd_config, tmp=None)
+
+subparser_delete = subparsers.add_parser("delete", help="Delete a host from the database")
+subparser_delete.add_argument("ip", help="IP address to delete")
+subparser_delete.add_argument("--db", help="Specify alternate config file")
+subparser_delete.set_defaults(func=cmd_delete, create=False, tmp=None)
+
+subparser_diff = subparsers.add_parser("diff", help="Diff current and new config files")
+subparser_diff.add_argument("--site", help="Diff the site files", action='store_true')
+subparser_diff.add_argument("--pager", help="Send output through pager", action='store_true')
+subparser_diff.add_argument("--db", help="Specify alternate config file")
+subparser_diff.add_argument("--tmp", help="Directory for the the next version files")
+subparser_diff.set_defaults(func=cmd_diff, create=False)
+
+subparser_install = subparsers.add_parser("install", help="Install new config files into the system")
+subparser_install.add_argument("--reset", help="Perform complete build/install; erase dhcp leases and reset dynamic dns", action='store_true')
+subparser_install.add_argument("--db", help="Specify alternate config file")
+subparser_install.add_argument("--chroot", help="Configure bind server for chrooted operation", action='store_true')
+subparser_install.add_argument("--site", help="Install the bind/dhcp configuration files (See docs)", action='store_true')
+subparser_install.add_argument("--tmp", help="Where to get the previously-generated files")
+subparser_install.add_argument("--debug", help="Set debug mode", action='store_true')
+subparser_install.set_defaults(func=cmd_install, create=False)
+
+subparser_list = subparsers.add_parser("list", help="List the complete database")
+subparser_list.add_argument("--db", help="Specify alternate config file name")
+subparser_list.add_argument("--dump", help="Print list in import format", action='store_true')
+subparser_list.set_defaults(func=cmd_list, create=False, tmp=None)
+
+subparser_modify = subparsers.add_parser("modify", help="Modify host attributes in the database")
+subparser_modify.add_argument("ip", help="IP address to modify")
+subparser_modify.add_argument("--db", help="Specify alternate config file name")
+subparser_modify.add_argument("--dhcphostopt", help="Name of dhcphostopt to add to the host's DHCP entry")
+subparser_modify.add_argument("--hostname", help="New hostname for IP address")
+subparser_modify.add_argument("--mac", help="New MAC address for IP address")
+subparser_modify.add_argument("--newhostname", help="New hostname")
+subparser_modify.add_argument("--note", help="New note field for the host")
+subparser_modify.set_defaults(func=cmd_modify, create=False, tmp=None)
+
+subparser_show = subparsers.add_parser("show", help="Show a single host")
+subparser_show.add_argument("host", help="Full or partial hostname/IP/MAC host to show")
+subparser_show.add_argument("--db", help="Specify alternate config file name")
+subparser_show.set_defaults(func=cmd_show, create=False, tmp=None)
+
+subparser_help = subparsers.add_parser("help", help="Print help")
+subparser_help.set_defaults(func=cmd_help, create=False, tmp=None)
+
+args = pd.parser.parse_args()
+args.func(pd, args)
+exit
