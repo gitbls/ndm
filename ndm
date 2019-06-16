@@ -16,7 +16,7 @@ import sys
 import time
 import uuid
 
-ndmversion = "0.9"
+ndmversion = "0.91"
 # fns entries: '11hosts':hosts file, '21dhcpconf':dhcpd.conf, '22dhcpsubnet':dhcp-<subnet>.hosts,
 #              '31bindconf':named.conf.options, '32blockconf':ndm-bind-blocked.conf,
 #              '41domzone':domain-zone-file, '42revdomzone':reverse-zone-file, '43blockzone':db.ndm-blocked.zone
@@ -45,7 +45,7 @@ class pdat:
         self.db = {}
         self.listformat = "{:<16} {:<17} {:<16} {:<16} {:<16} {}"
         self.resolvconf = "name_servers=127.0.0.1\ndomain={}\nsearch_domains={}\nsearch_domains_append=dyn.{}\n"
-        self.initialize = '{"cfg":{"os":"", "domain":"local", "subnet":"", "subnetmask":"", "gateway":"", "timeserver":"",\
+        self.initialize = '{"cfg":{"os":"", "domain":"me", "subnet":"", "subnetmask":"", "gateway":"", "timeserver":"",\
         "dnsip":"", "dnsfqdn":"", "mxfqdn":"", "dhcplease":"86400", "dhcpsubnet":"","dnslistenport":"53", "myip":"",\
         "servicewait":"5", "externaldns":"", "hostfqdn":"", "blockdomains":"", "bindinclude":"", "dhcpinclude":"",\
         "dhcpglobalopt":"", "dhcphostopt":{}},"hosts":{},"cname":{}}'

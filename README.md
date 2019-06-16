@@ -16,7 +16,7 @@ ndm Bind9 and isc-dhcp-server subnet configuration management
 * Maintain and easily update dns and dhcpd configuration files and /etc/hosts 
     * ndm eliminates the need to hand-edit any dns or dhcp config files
 * Easily establish your own local domain name
-    * The easily-changed default is '.local'
+    * The easily-changed default is '.me'
 * Devices can either have statically assigned or dynamic IP addresses
     * Devices with dynamically assigned IP addresses are automatically added to dns when they come onto the network
 * Per-host dhcp attributes can be set
