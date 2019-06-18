@@ -45,7 +45,7 @@ class pdat:
         self.db = {}
         self.listformat = "{:<16} {:<17} {:<16} {:<16} {:<16} {}"
         self.resolvconf = "name_servers=127.0.0.1\ndomain={}\nsearch_domains={}\nsearch_domains_append=dyn.{}\n"
-        self.initialize = '{"cfg":{"os":"", "domain":"me", "subnet":"", "subnetmask":"", "gateway":"", "timeserver":"",\
+        self.initialize = '{"cfg":{"os":"", "domain":"me", "subnet":"", "internals":"", "subnetmask":"", "gateway":"", "timeserver":"",\
         "dnsip":"", "dnsfqdn":"", "mxfqdn":"", "dhcplease":"86400", "dhcpsubnet":"","dnslistenport":"53", "myip":"",\
         "servicewait":"5", "externaldns":"", "hostfqdn":"", "blockdomains":"", "bindinclude":"", "dhcpinclude":"",\
         "dhcpglobalopt":"", "dhcphostopt":{}},"hosts":{},"cname":{}}'
@@ -222,13 +222,13 @@ def writezonedef(pd, fl, zonename, zonefile):
 
 def writebindconf(pd):
     with open(pd.fns['31bindconf'][fnstmp], 'w') as fl:
-
+        sinternals = "" if pd.db['cfg']['internals'] == "" else "{};".format(pd.db['cfg']['internals'])
         fl.write('\n\
 // Consider adding the 1918 zones here, if they are not used in your\n\
 // organization\n\
 //include "/etc/bind/zones.rfc1918";\n\
 \n\
-    acl internals {{ 127.0.0.0/8; {}.0/24; }};\n\
+    acl internals {{ 127.0.0.0/8; {}.0/24; {} }};\n\
 \n\
 options {{\n\
     directory "{}";\n\
@@ -240,7 +240,7 @@ options {{\n\
     allow-query-cache {{ internals; }};\n\
     allow-recursion {{ internals; }};\n\
     forwarders {{ 1.1.1.1; 1.0.0.1; }};\n\
-}};\n\n'.format(pd.db['cfg']['subnet'], pd.bindrundir, pd.db['cfg']['dnslistenport'], pd.db['cfg']['myip']))
+}};\n\n'.format(pd.db['cfg']['subnet'], sinternals, pd.bindrundir, pd.db['cfg']['dnslistenport'], pd.db['cfg']['myip']))
 
         fl.write('\n\
 key dhcp-update {{\n\
@@ -730,6 +730,7 @@ def cmd_config(pd, args):
     if args.mxfqdn != None: pd.db['cfg']['mxfqdn'] = args.mxfqdn.lower()
     if args.hostfqdn != None: pd.db['cfg']['hostfqdn'] = args.hostfqdn.lower()
     if args.myip != None: pd.db['cfg']['myip'] = args.myip
+    if args.internals != None: pd.db['cfg']['internals'] = args.internals
     if args.dhcplease != None: pd.db['cfg']['dhcplease'] = args.dhcplease
     if args.servicewait != None: pd.db['cfg']['servicewait'] = args.servicewait
     if args.externaldns != None: pd.db['cfg']['externaldns'] = args.externaldns
@@ -747,7 +748,7 @@ def cmd_config(pd, args):
     if (args.domain != None) or (args.subnet != None) or (args.gateway != None) or (args.timeserver != None)\
        or (args.dnsip != None) or (args.dnsfqdn != None) or (args.mxfqdn != None) or (args.dhcplease != None)\
        or (args.servicewait != None) or (args.externaldns != None) or (args.dhcpsubnet != None)\
-       or (args.dhcphostopt != None) or (args.blockdomains != None)\
+       or (args.internals != None) or (args.dhcphostopt != None) or (args.blockdomains != None)\
        or (args.dnslistenport != None) or (args.myip != None)\
        or (args.dhcpglobalopt != None) or (args.hostfqdn != None): pd.dbmodified = True
 
@@ -761,6 +762,7 @@ def cmd_config(pd, args):
     elif args.list:
         for i in sorted(pd.db['cfg']):
             if i != 'dhcphostopt': print("{:<15} {}".format(i, pd.db['cfg'][i]))
+            
         if len(pd.db['cfg']['dhcphostopt']) > 0:
             print("DHCP per-host options")
             for i in pd.db['cfg']['dhcphostopt']:
@@ -950,6 +952,7 @@ subparser_config.add_argument("--domain", help="Domain name")
 subparser_config.add_argument("--externaldns", help="External DNS Servers")
 subparser_config.add_argument("--gateway", help="Network gateway")
 subparser_config.add_argument("--hostfqdn", help="My host FQDN")
+subparser_config.add_argument("--internals", help="Additional bind internals subnets")
 config_addil = subparser_config.add_mutually_exclusive_group()
 config_addil.add_argument("--importnet", help="Import a file of hosts")
 config_addil.add_argument("--list", help="Show the current configuration", action='store_true')

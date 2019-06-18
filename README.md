@@ -273,6 +273,12 @@ The flags correspond to the command-line switches of the *add command*. When inc
 
 Once the network database has been successfully imported, do a `ndm build` and `ndm install`.
 
+## Using ndm with multiple LAN subnets or a VPN
+
+By default, the name server is configured to only accept requests from the host on which the name server is running, and any hosts in the subnet specified by --subnet. If you're using multiple LAN subnets or have a VPN installed that will use your DNS server for name services, you must specify the additional subnets using the `ndm config --internals` command. 
+
+For instance, if my VPN provides client IP addresses in subnet 10.42.10.0/24, I would use `ndm config --internals 10.42.10.0/24`, and ndm will add that subnet to the list of subnets allowed to query the name server.
+
 ## Using ndm with Pi-Hole
 
 If you want to run ndm and bind/dhcpd on the same system as Pi-Hole, here are the steps. Basic testing has been done with both running on the same system.
