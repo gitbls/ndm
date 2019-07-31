@@ -16,7 +16,7 @@ import sys
 import time
 import uuid
 
-ndmversion = "0.91"
+ndmversion = "0.92"
 # fns entries: '11hosts':hosts file, '21dhcpconf':dhcpd.conf, '22dhcpsubnet':dhcp-<subnet>.hosts,
 #              '31bindconf':named.conf.options, '32blockconf':ndm-bind-blocked.conf,
 #              '41domzone':domain-zone-file, '42revdomzone':reverse-zone-file, '43blockzone':db.ndm-blocked.zone
@@ -97,7 +97,7 @@ def ipinvert(ipaddr):
     return '.'.join([els[2], els[1], els[0]])
     
 def ckconfig(pd, args):
-    ignore = ['dhcphostopt', 'dhcpglobalopt', 'hostfqdn', 'dnsip', 'blockdomains', 'subnetmask', 'bindinclude', 'dhcpinclude']
+    ignore = ['dhcphostopt', 'dhcpglobalopt', 'hostfqdn', 'dnsip', 'blockdomains', 'subnetmask', 'bindinclude', 'dhcpinclude', 'internals']
     missing = ""
     for i in pd.db['cfg']:
         if not i in ignore:
@@ -651,8 +651,8 @@ def getmodifyhostname(pd, args, keyname, hname, withwhat):
 
 def chrootconfig(pd, args):
     # From https://wiki.debian.org/Bind9
-    # Change /etc/default/bind9 OPTIONS="-u bind -t /var/bind9/chroot"
     if os.path.isdir("/var/bind9/chroot"): perrorexit("? chroot appears to already be established")
+    # Change /etc/default/bind9 OPTIONS="-u bind -t /var/bind9/chroot"
     subprocess.call('sed -i \'s/OPTIONS="-u bind"/OPTIONS="-u bind -t \/var\/bind9\/chroot"/\' /etc/default/bind9', shell=True)
     for dir in [ "etc", "dev", "var/cache/bind", "var/run/named" ]:
         subprocess.call("mkdir -p /var/bind9/chroot/{}".format(dir), shell=True)
@@ -924,7 +924,7 @@ subparser_add.add_argument("--mac", help="MAC address for new hostname")
 subparser_add.add_argument("--nodhcp", help="Don't add host to dhcpd.conf", action='store_true')
 subparser_add.add_argument("--nodomain", help="Don't add the domain name to this entry; It's already fully qualified", action='store_true')
 subparser_add.add_argument("--note", help="Note text for new hostname")
-subparser_add.add_argument("--zoneonly", help="Only put thishost in DNS config files (no dhcpd.conf or hosts file)", action='store_true')
+subparser_add.add_argument("--zoneonly", help="Only put this host in DNS config files (no dhcpd.conf or hosts file)", action='store_true')
 subparser_add.set_defaults(func=cmd_add, create=False, tmp=None)
 
 subparser_build = subparsers.add_parser("build", help="Build new host databases in tmp staging area")
