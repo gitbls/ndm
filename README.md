@@ -2,7 +2,7 @@ ndm Bind9 and isc-dhcp-server subnet configuration management
 
 ## Overview
 
-**ndm** dramatically simplifies the configuration and management of DNS (bind9, also referred to as bind or dns) and DHCP (isc-dhcp-server, also referred to as dhcpd) services for a small home or business network with a prescriptive, but customoizable and extensible, configuration. ndm can run on any small Linux box, such as a Raspberry Pi, or any other supported Linux distribution. While most, if not all routers provide DNS and DHCP services, ndm has some significant advantages over using your router for these services:
+**ndm** dramatically simplifies the configuration and management of DNS (bind9, also referred to as bind or dns) and DHCP (isc-dhcp-server, also referred to as dhcpd) services for a small home or business network with a prescriptive, but customizable and extensible, configuration. ndm can run on any small Linux box, such as a Raspberry Pi, or any other supported Linux distribution. While most, if not all routers provide DNS and DHCP services, ndm has some significant advantages over using your router for these services:
 
 * The ndm configuration is router-independent. You can replace your router and still have exactly the same DNS configuration, and all your computers at their proper IP addresses.
 * The ndm configuration is host independent as well. If your Linux box dies, you can quickly and easily recreate your configuration (as long as you've backed up the ndm database). (You do backup, don't you?).
@@ -37,13 +37,13 @@ Since my specific network is fully supported, I'm good :) :) However, there are 
 * V1 is only tested and supported on two Linux distros: Raspberry Pi with Raspbian Stretch and openSUSE Leap 15
 * Nameserver failover. Looking into it.
 
-## Installing on Raspbian Stretch
+## Installing on Raspbian
 
 Review the sections at the end of the document to learn about installing on other Distros. Perform the following steps for Raspbian:
 
 * Copy ndm to your system somewhere in your path. I use /usr/local/bin. The ndm database is **/etc/dbndm.json**
 
-* If you don't have a network time server on your network, install and configure ntp so that your network clients have a time server available. `sudo apt-get install ntp`. If you already have a time server on your network, you'll need to know it's IP address.
+* If you don't have a network time server on your network, install and configure chrony or ntp so that your network clients have a time server available. `sudo apt-get install chrony`. If you already have a time server on your network, you'll need to know it's IP address.
 
 * Install bind and isc-dhcp-server:
 
@@ -53,7 +53,7 @@ Review the sections at the end of the document to learn about installing on othe
 
 * Edit /etc/default/isc-dhcp-server to set the INTERFACESV4 setting, e.g., INTERFACESv4=eth0
 
-* Linux provides several different ways to configure the network, and any of them will work, of course, if properly configured. I recommend using systemd-networkd to configure the network on the system that is hosting bind/dhcpd/ndm. It is the most lightweight, and easy-to-configure mechanism for the static IP use case. Here are the steps:
+* Linux provides several different ways to configure the network, and any of them will work, of course, if properly configured. I recommend using dhcpcd or systemd-networkd to configure the network on the system that is hosting bind/dhcpd/ndm. systemd-networkd is the most lightweight, and easy-to-configure mechanism for the static IP use case. Here are the steps:
 
     * Enable systemd-networkd: `sudo systemctl enable systemd-networkd`
     * Disable dhcpcd: `sudo systemctl disable dhcpcd`
@@ -74,12 +74,21 @@ DNS=192.168.42.2
 Domains=mydomain.com
 NTP=192.168.42.2
 ```
+* If you choose to use dhcpcd, sudo edit /etc/dhcpcd.conf to include a static definition for your ethernet (adjusting for your configuration as appropriate):
+
+```
+interface eth0
+static ip_address=192.168.42.2/24
+static routers=192.168.42.1
+static domain_name_servers=192.168.42.2
+```
+
 
 * Reboot, verify your network configuration, and then proceed with creating the ndm configuration.
 
 ## Creating the ndm configuration
 
-Create the database and configure it. The examples in this document use subnet 192.168.42.0/24. Adjust this for your network configuration. It also assumes that computer mypi is at 192.168.42.2 and is running ntp (time service) and a mail server as well as dns/dhcp/ndm.
+Create the database and configure it. The examples in this document use subnet 192.168.42.0/24. Adjust this as appropriate for your network configuration. It also assumes that computer mypi is at 192.168.42.2 and is running ntp (time service) and a mail server as well as dns/dhcp/ndm.
 
 * Create and configure the database
 
@@ -120,11 +129,11 @@ Changes to the ndm host database with `ndm add`, `ndm delete`, or `ndm modify` r
 
 ### Adding an external host to /etc/hosts
 
-* `ndm add 8.23.224.120 --hostname dynupdate.no-ip.com --hostsonly --nodomain` - Adds the entry to /etc/hosts. This is useful for names that need to be made available early in the boot process.
+* `ndm add 12.10.2.1 --hostname example.some.com --hostsonly --nodomain` - Adds the entry to /etc/hosts. This is useful for names that need to be made available early in the boot process.
     * As with the first example, an `ndm build` and `ndm install` must be performed.
 
-* `ndm add 192.168.42.12 --mac 4c:01:43:77:11:10 --hostname eerobase --note "eero in wiring closet"` - Eero sends multiple dhcp requests on different MAC addresses. I found that they can use the same IP address, so I use these two commands to force that. The second entry is only in the dhcpd config file, and not present in the dhcp zone or /etc/hosts files.
-    * `ndm add 192.168.42.12 --mac 4c:01:43:77:11:22 --hostname eerobasex --dhcponly` - This is the second MAC address on the eero. This enables the dhcp server to respond to it, but the hostname is not made visible in dns.
+* `ndm add 192.168.42.12 --mac 4c:01:44:77:11:10 --hostname eerobase --note "eero in wiring closet"` - Eero sends multiple dhcp requests on different MAC addresses. I found that they can use the same IP address, so I use these two commands to force that. The second entry is only in the dhcpd config file, and not present in the dhcp zone or /etc/hosts files.
+    * `ndm add 192.168.42.12 --mac 4c:01:44:77:11:22 --hostname eerobasex --dhcponly` - This is the second MAC address on the eero. This enables the dhcp server to respond to it, but the hostname is not made visible in dns.
 
 
 ### Deleting a host
@@ -293,16 +302,16 @@ If you want to run ndm and bind/dhcpd on the same system as Pi-Hole, here are th
 
 Things of note
 
-* Under advanced DNS settings, clear never forward non-fqdns and never forward reverse-lookups for IP ranges. 
+* Under piHole advanced DNS settings, clear the "never forward non-fqdns" and "never forward reverse-lookups for IP ranges". 
 * In PiHole specify the DNS server as 127.0.0.1#portnum or ipaddr#portnum (use a '#' to separate the IP address and port)
 * I have not yet found a way to set domain search for dyn.domain except by editing resolv.conf
 
 
 ## Why use bind9 and isc-dhcp-server and not dnsmasq...or Pi-Hole?
 
-Both systems (bind9/isc-dhcp-server and dnsmasq) are great. This is most definitely not a question of one being better than the other. I've been using bind/dhcpd since my Linux day 1, and I've never had a problem with it, other than tending to the configuration files, meaning...I have never had any incentive to change. Rather, I just needed a better tool for managing the configuration, and ndm is it.
+Both systems (bind9/isc-dhcp-server and dnsmasq) are great. This is most definitely not a question of one being better than the other. I've been using bind/dhcpd since my Linux day 1 (20+ years ago), and I've never had a problem with it, other than tending to the configuration files, meaning...I have never had any incentive to change. Rather, I just needed a better tool for managing the configuration, and ndm is it.
 
-If you like dnsmasq, great!
+If you like dnsmasq, great! If you'd like to use ndm with dnsmasq, let me know...it will provide me with inspiration to do make it happen.
 
 On the other hand, if you haven't used either dns/dhcpd system and are looking to start, I would argue that bind/dhcpd/ndm is much easier to configure than dnsmasq for the home/small business network.
 
@@ -320,7 +329,7 @@ Known configuration issues:
 
     * Check ndm settings: `ndm config`
     * If dnsip and/or myip are set to 127.0.0.1, correct them: `ndm config --dnsip my.ip.ad.dr --myip my.ip.ad.dr` for the fixed IP address that you have statically assigned and configured for this host.
-    * Why is this? There isn't a good way to reliably get the hosts's IP address if the name service is not fully configured. The only ways that I've found either require internet access, other knowledge about the network, installing additional Python packages, or parsing command output. If there's a programmatic way to get the host's ethernet adapter real IP address reliably, please let me know!
+    * Why is this? There isn't a good way to reliably get the hosts's IP address if the name service is not fully configured. The only ways that I've found either require internet access, other knowledge about the network, installing additional Python packages, or parsing command output. If there's a Pythonic way to reliably get the host's ethernet adapter real IP address, please let me know!
 
 * /etc/resolv.conf changes unexpectedly. This might occur if you are using dhcpcd or NetworkManager, and have established alternate network configurations. DNS and DHCP are server services, so the host running them should only have one network configuration, the static IP address.
 
@@ -328,9 +337,9 @@ Known configuration issues:
 
 This section includes a few notes on using ndm on various Linux distributions
 
-### Raspbian Stretch
+### Raspbian Stretch and later
 
-Raspbian Stretch is fully-supported by ndm as documented above.
+Raspbian Stretch, Buster, and later are fully-supported by ndm as documented above.
 
 ### OpenSuse Leap
 
