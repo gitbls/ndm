@@ -16,7 +16,7 @@ import sys
 import time
 import uuid
 
-ndmversion = "0.92"
+ndmversion = "0.95"
 # fns entries: '11hosts':hosts file, '21dhcpconf':dhcpd.conf, '22dhcpsubnet':dhcp-<subnet>.hosts,
 #              '31bindconf':named.conf.options, '32blockconf':ndm-bind-blocked.conf,
 #              '41domzone':domain-zone-file, '42revdomzone':reverse-zone-file, '43blockzone':db.ndm-blocked.zone
@@ -69,9 +69,8 @@ class pdat:
                              "fe00::0":"ipv6-localnet", "ff00::0":"ipv6-mcastprefix",\
                              "ff02::1":"ipv6-allnodes", "ff02::2":"ipv6-allrouters", "ff02::3":"ipv6-allhosts"}
 
-def perrorexit(msg):
-    print(msg)
-    quit()
+def perrorexit(emsg):
+    raise SystemExit(emsg)
 
 def qdelfile(fn):
     try:
@@ -408,7 +407,7 @@ def emithost(pd, eipaddr, ehost, fnormal):
             s1 = "{:<15} IN A     {}\n".format(ehost, eipaddr)
             pd.fns['41domzone'][fnhandle].write(s1)
         # domain reverse file
-        if not ("hostsonly" in eopts) and not ("zoneonly" in eopts) and not ("dhcponly" in eopts):
+        if (pd.db['cfg']['subnet'] in eipaddr) and not ("hostsonly" in eopts) and not ("zoneonly" in eopts) and not ("dhcponly" in eopts):
             pd.fns['42revdomzone'][fnhandle].write("{:<3} IN PTR {}.{}.\n".format(eipaddr.split('.')[fnhandle], ehost, pd.db['cfg']['domain']))
         # hosts
         if not ("zoneonly" in eopts) and not ("dhcponly" in eopts):
@@ -445,6 +444,7 @@ def setosdirs(pd, args):           # Get OS-specific filenames into well-known l
     pd.binduser = pd.osdetails[os]['binduser']
 
 def getostype(pd, args):
+    ostype = pd.db['cfg']['os']
     if pd.db['cfg']['os'] == "":
         try:
             with open("/etc/os-release") as f:
@@ -455,18 +455,19 @@ def getostype(pd, args):
                         break
         except:
             ostype = ""
-        if args.os != None: ostype = args.os
-        ostype = ostype.replace('"','').lower()
-        if ostype == "":
-            perrorexit ("? No OS ID information found in /etc/os-release and --os not specified")
+    if args.os != None: ostype = args.os
+    ostype = ostype.replace('"','').lower()
+    if ostype == "":
+        perrorexit ("? No OS ID information found in /etc/os-release and --os not specified")
+    if ostype != pd.db['cfg']['os']:
         for knownos in pd.osdetails:
             if knownos in ostype:
                 pd.db['cfg']['os'] = knownos
                 setosdirs(pd, args)
                 pd.dbmodified = True
                 break
-        else:
-            perrorexit("? Unknown OS '{}'".format(pd.ostype))
+            else:
+                perrorexit("? Unknown OS '{}'".format(ostype))
 
 def buildnode(pd, keyname, listfmt):
     if keyname in pd.db['hosts']:
@@ -775,14 +776,41 @@ def cmd_delete(pd, args):
     keyname = args.ip
     if keyname is None: perrorexit("? No IP address specified")
     if keyname in pd.db['hosts']:
-        print("% Deleting IP address {}".format(keyname))
-        del pd.db['hosts'][keyname]
+        if args.hostname != None:
+            # Delete a single hostname from an IP address
+            if not args.hostname in pd.db['hosts'][keyname]['hostname']: perrorexit("? Hostname {} not found on IP address {}".format(args.hostname, keyname))
+            if len(pd.db['hosts'][keyname]['hostname']) > 1:
+                print("% Deleting host {} from IP address {}".format(args.hostname, keyname))
+                del pd.db['hosts'][keyname]['hostname'][args.hostname]
+            else:
+                print("% Deleting IP address {}".format(keyname))
+                del pd.db['hosts'][keyname]
+        else:
+            print("% Deleting IP address {}".format(keyname))
+            del pd.db['hosts'][keyname]
     else:
         if keyname in pd.db['cname']:
             print("% Deleting CNAME '{}'".format(keyname))
             del pd.db['cname'][keyname]
         else:
             perrorexit("? IP address {} is not in the database".format(keyname))
+    pd.dbmodified = True
+    dbdumpfile(pd, args)
+    return True
+
+def cmd_reip(pd, args):
+    dbloadfile(pd, args, True)
+    keyname = args.ip
+    if keyname is None: perrorexit("? No IP address specified")
+    if keyname in pd.db['hosts']:
+        newip = args.newip
+        if newip in pd.db['hosts']: perrorexit("? New IP Address {} is already in the database".format(newip))
+        for hn in pd.db['hosts'][keyname]['hostname']:
+            addhost(pd, newip, pd.db['hosts'][keyname]['hostname'][hn]['macaddr'], pd.db['hosts'][keyname]['dhcphostopt'],\
+                    hn, pd.db['hosts'][keyname]['hostname'][hn]['flags'], pd.db['hosts'][keyname]['hostname'][hn]['note'])
+        del pd.db['hosts'][keyname]
+    else:
+        perrorexit("? IP address {} is not in the database".format(keyname))
     pd.dbmodified = True
     dbdumpfile(pd, args)
     return True
@@ -968,6 +996,7 @@ subparser_config.set_defaults(func=cmd_config, tmp=None)
 subparser_delete = subparsers.add_parser("delete", help="Delete a host from the database")
 subparser_delete.add_argument("ip", help="IP address to delete")
 subparser_delete.add_argument("--db", help="Specify alternate config file")
+subparser_delete.add_argument("--hostname", help="Specify a hostname to delete from the IP address")
 subparser_delete.set_defaults(func=cmd_delete, create=False, tmp=None)
 
 subparser_diff = subparsers.add_parser("diff", help="Diff current and new config files")
@@ -1000,6 +1029,12 @@ subparser_modify.add_argument("--mac", help="New MAC address for IP address")
 subparser_modify.add_argument("--newhostname", help="New hostname")
 subparser_modify.add_argument("--note", help="New note field for the host")
 subparser_modify.set_defaults(func=cmd_modify, create=False, tmp=None)
+
+subparser_reip = subparsers.add_parser("reip", help="Change a hosts's IP address")
+subparser_reip.add_argument("ip", help="IP address to change")
+subparser_reip.add_argument("--newip", help="New IP address")
+subparser_reip.add_argument("--db", help="Specify alternate config file")
+subparser_reip.set_defaults(func=cmd_reip, create=False, tmp=None)
 
 subparser_show = subparsers.add_parser("show", help="Show a single host")
 subparser_show.add_argument("host", help="Full or partial hostname/IP/MAC host to show")

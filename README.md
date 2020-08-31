@@ -9,7 +9,7 @@ ndm Bind9 and isc-dhcp-server subnet configuration management
 * Speaking of proper addresses, ndm lets you easily assign specific IP addresses to specific devices. For instance, the system running ndm/bind/dhcpd will need a fixed IP address. You may want to assign specific IP addresses to other devices on your network. Some people find that pre-defining the IP addresses of all devices on the network creates a comforting feeling.
 * ndm fully configures dynamic dns for your network. Systems that do not have statically assigned IP addresses are automatically added to dns.
 * Easily name your own home network domain
-* The ndm configuration is maintained in a single, portable file, so it's easy to backup and restore.
+* The ndm database and configuration is maintained in a single, portable file, so it's easy to backup and restore.
 
 **ndm capabilities include**
 
@@ -34,7 +34,7 @@ Since my specific network is fully supported, I'm good :) :) However, there are 
 
 * Only /24 networks are supported. This includes 192.168.n.* for any 'n'. 
 * No IPV6 support
-* V1 is only tested and supported on two Linux distros: Raspberry Pi with Raspbian Stretch and openSUSE Leap 15
+* V1 is only tested and supported on two Linux distros: Raspberry Pi with Raspbian Stretch or later and openSUSE Leap 15
 * Nameserver failover. Looking into it.
 
 ## Installing on Raspbian
@@ -135,16 +135,19 @@ Changes to the ndm host database with `ndm add`, `ndm delete`, or `ndm modify` r
 * `ndm add 192.168.42.12 --mac 4c:01:44:77:11:10 --hostname eerobase --note "eero in wiring closet"` - Eero sends multiple dhcp requests on different MAC addresses. I found that they can use the same IP address, so I use these two commands to force that. The second entry is only in the dhcpd config file, and not present in the dhcp zone or /etc/hosts files.
     * `ndm add 192.168.42.12 --mac 4c:01:44:77:11:22 --hostname eerobasex --dhcponly` - This is the second MAC address on the eero. This enables the dhcp server to respond to it, but the hostname is not made visible in dns.
 
-
 ### Deleting a host
 
-* `ndm delete 192.168.42.17` - Deletes the entry with IP address 192.168.42.17 from the database.
+* `ndm delete 192.168.42.17` &mdash; Deletes the entry with IP address 192.168.42.17 from the database.
 * As with the first example, an `ndm build` and `ndm install` must be performed.
 
 ### Modifying a host
 
 * `ndm modify 192.168.42.3 --note "New server 2018-12-04" --mac mm:mm:mm:mm:mm:mm`
 * As with the first example, an `ndm build` and `ndm install` must be performed.
+
+### Changing the IP address for a host
+
+* `ndm reip 192.168.42.7 --newip 192.168.42.3` &mdash; Changes the IP address for all hostnames associated with the old IP address. And `ndm build` and `ndm install` must be performed.
 
 ## Detailed command information
 
@@ -196,7 +199,7 @@ To add a CNAME record, use: `ndm add cnamestring --hostname cnamevalue.mydomain.
 
 **build - **Build the dns and dhcp config files from the database
 
-The *build* command has two forms: with the --site switch, and without it. If --site is provided, ndm builds the site-level  bind configuration files, the dhcpd configuration file, and generates a new dhcp-key. The files are created in a temporary directory and are not in use until you `ndm install --site` (and stop/restart dhcp and dns servers). The temporary directory is /tmp/ndm.*username*, but  can be changed with the --tmp switch. If you change the temporary directory for the *build* command, you also must change it for the *diff* and *install* commands.
+The *build* command has two forms: with the --site switch, and without it. If --site is provided, ndm builffds the site-level  bind configuration files, the dhcpd configuration file, and generates a new dhcp-key. The files are created in a temporary directory and are not in use until you `ndm install --site` (and stop/restart dhcp and dns servers). The temporary directory is /tmp/ndm.*username*, but  can be changed with the --tmp switch. If you change the temporary directory for the *build* command, you also must change it for the *diff* and *install* commands.
 
 **config - **Manage the ndm configuration database
 
@@ -204,7 +207,7 @@ The *config* command controls the site configuration database, and is used to do
 
 **delete - **Delete an entry from the database
 
-deletes a host from the database
+deletes a host from the database. If an IP address has multiple names associated with it, you can use the --hostname switch to delete a specific hostname. Deleting the last (or only) hostname on an IP address deletes the IP address.
 
 **diff -** Diff the system config files against the newly-created config
 
@@ -225,6 +228,8 @@ If --dump is specified, the output is in *ndm import* format, which can be loade
 You must specify the IP address. When renaming the hostname associated with an IP address, use the --newhostname switch. If an IP address has multiple hostnames associated with it, the --hostname switch must be used to specify which hostname to modify.
 
 The --mac and --note switches and the various flags are attached to the hostname. The --dhcphostopt switch is attached to the IP address, so a hostname is not required when changing this setting.
+
+**reip - **Change the IP address for all hosts assigned to the given IP address.
 
 **show - **Display an entry or set of entries
 
