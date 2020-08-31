@@ -153,7 +153,7 @@ Changes to the ndm host database with `ndm add`, `ndm delete`, or `ndm modify` r
 
 This section includes some discussion about each command including useful hints.
 
-**add &mdash; **Add a new hostname to the database
+**add &mdash;** Add a new hostname to the database
 
 You only need to do this if the host will have a fixed IP address, or it requires special DHCP handling, such as PXE booting.
 
