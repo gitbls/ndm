@@ -147,7 +147,7 @@ Changes to the ndm host database with `ndm add`, `ndm delete`, or `ndm modify` r
 
 ### Changing the IP address for a host
 
-* `ndm reip 192.168.42.7 --newip 192.168.42.3` &mdash; Changes the IP address for all hostnames associated with the old IP address. And `ndm build` and `ndm install` must be performed.
+* `ndm reip 192.168.42.7 --newip 192.168.42.3` &mdash; Changes the IP address for all hostnames associated with the old IP address. `ndm build` and `ndm install` must be performed.
 
 ## Detailed command information
 
@@ -197,41 +197,41 @@ optional arguments:
 
 To add a CNAME record, use: `ndm add cnamestring --hostname cnamevalue.mydomain.com. --cname`. (note the trailing ".") This will create a CNAME record for *cnamestring*, and it's value is *cnamevalue.mydomain.com.*
 
-**build &mdash; **Build the dns and dhcp config files from the database
+**build &mdash;** Build the dns and dhcp config files from the database
 
 The *build* command has two forms: with the --site switch, and without it. If --site is provided, ndm builffds the site-level  bind configuration files, the dhcpd configuration file, and generates a new dhcp-key. The files are created in a temporary directory and are not in use until you `ndm install --site` (and stop/restart dhcp and dns servers). The temporary directory is /tmp/ndm.*username*, but  can be changed with the --tmp switch. If you change the temporary directory for the *build* command, you also must change it for the *diff* and *install* commands.
 
-**config &mdash; **Manage the ndm configuration database
+**config &mdash;** Manage the ndm configuration database
 
 The *config* command controls the site configuration database, and is used to do bulk import of host definitions. See the section "Importing a network database" below for details on bulk importing. An *ndm config* command with no switches defaults to `ndm config --list`.
 
-**delete &mdash; **Delete an entry from the database
+**delete &mdash;** Delete an entry from the database
 
 deletes a host from the database. If an IP address has multiple names associated with it, you can use the --hostname switch to delete a specific hostname. Deleting the last (or only) hostname on an IP address deletes the IP address.
 
-**diff &mdash; ** Diff the system config files against the newly-created config
+**diff &mdash;** Diff the system config files against the newly-created config
 
 Use the *diff* command to verify the changes in the newly-created config files against the files already in the system. As with the *build* and *install* commands, if --site is provided, the site-level bind and dhcp config files will be diffed. Without --site, the bind zone config files and dhcp blocked domain config will be diffed.
 
-**install &mdash; **Install the configuration files created by the *build* command
+**install &mdash;** Install the configuration files created by the *build* command
 
 installs the generated configuration. `install --site` installs new dhcp and bind site files and dhcp-key. Typically you'll do a `build --site` and `install --site` initially, and then very infrequently. See the section above "When is an ndm build/install needed?". Note: No running system configuration files are changed until an *ndm install* is done.
 
 The `install --reset` command resets all the dhcp and bind configurations to the just-initialized state. All dynamic zone definitions are removed, as are all DHCP leases. This is primarily for testing, but can be used with care on live networks. Best is to have all hosts with statically-assigned DHCP-requested addresses. 
 
-**list &mdash; **List all entries in the database.
+**list &mdash;** List all entries in the database.
 
 If --dump is specified, the output is in *ndm import* format, which can be loaded into ndm with the `ndm config --importnet` command.
 
-**modify &mdash; **Modify an existing host entry
+**modify &mdash;** Modify an existing host entry
 
 You must specify the IP address. When renaming the hostname associated with an IP address, use the --newhostname switch. If an IP address has multiple hostnames associated with it, the --hostname switch must be used to specify which hostname to modify.
 
 The --mac and --note switches and the various flags are attached to the hostname. The --dhcphostopt switch is attached to the IP address, so a hostname is not required when changing this setting.
 
-**reip &mdash; **Change the IP address for all hosts assigned to the given IP address.
+**reip &mdash;** Change the IP address for all hosts assigned to the given IP address.
 
-**show &mdash; **Display an entry or set of entries
+**show &mdash;** Display an entry or set of entries
 
 The argument can be an IP address (must fully match), part of a MAC address, or part of a host name. In the latter two cases, all matching entries are shown.
 
