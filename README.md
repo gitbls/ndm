@@ -257,7 +257,7 @@ Apply the dhcphostopt setting as desired to specific hosts:
 
 `ndm modify 192.168.42.17 --dhcphostopt PXE`
 
-`ndm modify 192.168.42.18 --dhcphostopt PXE,DNSE`
+`ndm modify 192.168.42.18 --dhcphostopt PXE,DNSX`
 
 If a dhcphostopt has been applied to a host but there is no dhcphosthopt configuration for the specified dhcphostopt, ndm will warn you, but continue.
 
