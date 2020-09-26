@@ -16,7 +16,7 @@ import sys
 import time
 import uuid
 
-ndmversion = "0.95"
+ndmversion = "0.96"
 # fns entries: '11hosts':hosts file, '21dhcpconf':dhcpd.conf, '22dhcpsubnet':dhcp-<subnet>.hosts,
 #              '31bindconf':named.conf.options, '32blockconf':ndm-bind-blocked.conf,
 #              '41domzone':domain-zone-file, '42revdomzone':reverse-zone-file, '43blockzone':db.ndm-blocked.zone
@@ -292,7 +292,7 @@ def mktsigkey(pd, args):
                 pd.dbmodified = True
 
 def doresolvconf(pd):
-    if not os.path.isfile("/etc/resolvconf.conf"): return True #Skip if needed
+    if not os.path.isfile("/etc/resolvconf.conf"): return True #Skip if not needed
     if not os.path.isfile("/etc/resolvconf.conf.ndm"):
         print("% Saving /etc/resolvconf.conf as /etc/resolvconf.conf.ndm")
         shutil.copy("/etc/resolvconf.conf", "/etc/resolvconf.conf.ndm")
@@ -339,7 +339,7 @@ def zonebuild(pd, args):
     writeblocklist(pd)
 
 def zoneinstall(pd, args):
-    print ("% Installing files from tmp directory '{}' to system directories".format(pd.tmp))
+    print ("% Installing zone files from tmp directory '{}' to system directories".format(pd.tmp))
     for i in sorted(pd.fns):
         if not pd.fns[i][fnsite]:
             print("  {}...".format(pd.fns[i][fnsname]))
@@ -361,8 +361,7 @@ def sitebuild(pd, args):
     return True
 
 def siteinstall(pd, args, svcs):
-    stopservices(pd, svcs)
-    print ("% Moving files from tmp directory '{}' to system directories".format(pd.tmp))
+    print ("% Installing site files from tmp directory '{}' to system directories".format(pd.tmp))
     for i in sorted(pd.fns):
         if pd.fns[i][fnsite]:
             tfile = pd.fns[i][fnsname]
@@ -374,14 +373,6 @@ def siteinstall(pd, args, svcs):
             qrename(tfile, pd.fns[i][fnsbak])
             shutil.copy(pd.fns[i][fnstmp], tfile)
     doresolvconf(pd)
-#    subprocess.call("chown {}:{} {}".format(pd.binduser, pd.binduser, pd.zdir), shell=True)  # Verify if needed
-    if args.reset:
-        # Delete jnl files and dhcp lease files \\ where are the dhcp lease files?
-        qdelfile("{}.jnl".format(pd.fns['51dynzone'][fnsname]))
-        qdelfile("{}.jnl".format(pd.fns['52revdynzone'][fnsname]))
-        qdelfile("{}/dhcpd.leases".format(pd.leasedir))
-        qdelfile("{}/dhcpd.leases~".format(pd.leasedir))
-    startservices(pd, svcs, True)
     return True
 
 def emithost(pd, eipaddr, ehost, fnormal):
@@ -700,16 +691,14 @@ def cmd_build(pd, args):
     setosdirs(pd, args)
     mktmpdir(pd, args)
     mkfilenames(pd, args)
-    # currently build doesn't set pd.modifed, so these don't get saved
+    # build command doesn't set pd.modifed, so these don't get saved
     # This enables build command settings to override config
     if args.bindinclude != None: pd.db['cfg']['bindinclude'] = args.bindinclude
     if args.dhcpinclude != None: pd.db['cfg']['dhcpinclude'] = args.dhcpinclude
-    if not args.site:
-        zonebuild(pd, args)
-    else:
-        sitebuild(pd, args)
+    zonebuild(pd, args)
+    sitebuild(pd, args)
     print("% Build completed into tmp directory '{}'".format(pd.tmp))
-    dbdumpfile(pd, args)
+#    dbdumpfile(pd, args)
     return True
 
 def cmd_config(pd, args):
@@ -844,17 +833,16 @@ def cmd_install(pd, args):
         if pd.db['cfg']['os'] != "raspbian": perrorexit("? --chroot not supported on '{}'".format(pd.db['cfg']['os']))
         if svcs[pd.dnsrv]: perrorexit("? Please 'systemctl stop bind9' before applying --chroot")
         return chrootconfig(pd, args)
+    zoneinstall(pd, args)
+    siteinstall(pd, args, svcs)
+    stopservices(pd, svcs)
     if args.reset:
-        zonebuild(pd, args)
-        stopservices(pd, svcs)
-        zoneinstall(pd, args)
-        siteinstall(pd, args, svcs)
-    else:
-        if not args.site:
-            zoneinstall(pd, args)
-            stopstartservices(pd, svcs)
-        else:
-            siteinstall(pd, args, svcs)
+        # Delete jnl files and dhcp lease files
+        qdelfile("{}.jnl".format(pd.fns['51dynzone'][fnsname]))
+        qdelfile("{}.jnl".format(pd.fns['52revdynzone'][fnsname]))
+        qdelfile("{}/dhcpd.leases".format(pd.leasedir))
+        qdelfile("{}/dhcpd.leases~".format(pd.leasedir))
+    startservices(pd, svcs, True)
     return True
 
 def cmd_list(pd, args):
@@ -959,7 +947,6 @@ subparser_build = subparsers.add_parser("build", help="Build new host databases 
 subparser_build.add_argument("--bindinclude", help="Specify an additional bind include file")
 subparser_build.add_argument("--db", help="Specify alternate config file")
 subparser_build.add_argument("--dhcpinclude", help="Specify an additional dhcp include file")
-subparser_build.add_argument("--site", help="Build the bind/dhcp configuration files (See docs)", action='store_true')
 subparser_build.add_argument("--tmp", help="Directory for the the generated files")
 subparser_build.set_defaults(func=cmd_build, create=False)
 
@@ -1010,7 +997,6 @@ subparser_install = subparsers.add_parser("install", help="Install new config fi
 subparser_install.add_argument("--reset", help="Perform complete build/install; erase dhcp leases and reset dynamic dns", action='store_true')
 subparser_install.add_argument("--db", help="Specify alternate config file")
 subparser_install.add_argument("--chroot", help="Configure bind server for chrooted operation", action='store_true')
-subparser_install.add_argument("--site", help="Install the bind/dhcp configuration files (See docs)", action='store_true')
 subparser_install.add_argument("--tmp", help="Where to get the previously-generated files")
 subparser_install.add_argument("--debug", help="Set debug mode", action='store_true')
 subparser_install.set_defaults(func=cmd_install, create=False)
