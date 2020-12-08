@@ -16,7 +16,7 @@ import sys
 import time
 import uuid
 
-ndmversion = "0.96"
+ndmversion = "1.1"
 # fns entries: '11hosts':hosts file, '21dhcpconf':dhcpd.conf, '22dhcpsubnet':dhcp-<subnet>.hosts,
 #              '31bindconf':named.conf.options, '32blockconf':ndm-bind-blocked.conf,
 #              '41domzone':domain-zone-file, '42revdomzone':reverse-zone-file, '43blockzone':db.ndm-blocked.zone
@@ -30,6 +30,7 @@ fnstmp =   2
 fnhandle = 3
 fnsite =   4  # True=file handled by --site 
 fnorig =   5  # True=make copy of original file
+fnddel=    6  # True=Don't delete if already exists (dyn zone files)
 
 # pd points to an instance of this class. practically everywhere
 class pdat:
@@ -342,10 +343,11 @@ def zoneinstall(pd, args):
     print ("% Installing zone files from tmp directory '{}' to system directories".format(pd.tmp))
     for i in sorted(pd.fns):
         if not pd.fns[i][fnsite]:
-            print("  {}...".format(pd.fns[i][fnsname]))
-            qdelfile(pd.fns[i][fnsbak])
-            qrename(pd.fns[i][fnsname], pd.fns[i][fnsbak])
-            shutil.copy(pd.fns[i][fnstmp], pd.fns[i][fnsname])
+            if not pd.fns[i][fnddel] or not os.path.isfile(pd.fns[i][fnsname]):
+                print("  {}...".format(pd.fns[i][fnsname]))
+                qdelfile(pd.fns[i][fnsbak])
+                qrename(pd.fns[i][fnsname], pd.fns[i][fnsbak])
+                shutil.copy(pd.fns[i][fnstmp], pd.fns[i][fnsname])
     os.chmod(pd.zdir, 0o2775)
 
 def sitebuild(pd, args):
@@ -536,17 +538,17 @@ def mkfilenames(pd, args):
     xhfile = fnsfmt.format(pd.etc, hfn)
     xdynfile = fnsfmt.format(pd.zdir, dyfn)
     xrdynfile = fnsfmt.format(pd.zdir, rdyfn)
-#          file(sys), file(sys).bak, file(tmp), runtime filehandle, Site-flag
-    pd.fns = { '11hosts':     [xhfile,  xhfile+bak,  pd.tmp+'/'+hfn,       None, False, True],\
-               '21dhcpconf':  [xdhfile, xdhfile+bak, pd.tmp+'/'+dhfn,      None, True,  True],\
-               '22dhcpsubnet':[xdzfile, xdzfile+bak, pd.tmp+'/'+dzfn,      None, False, False],\
-               '31bindconf':  [xnofile, xnofile+bak, pd.tmp+'/'+pd.nofile, None, True,  True],\
-               '32blockconf': [xblfile, xblfile+bak, pd.tmp+'/'+blfn,      None, False, False],\
-               '41domzone':   [xzfile,  xzfile+bak,  pd.tmp+'/'+zfn,       None, False, False],\
-               '42revdomzone':[xrzfile, xrzfile+bak, pd.tmp+'/'+rzfn,      None, False, False],\
-               '43blockzone': [xbzfile, xbzfile+bak, pd.tmp+'/'+bzfn,      None, True,  False],\
-               '51dynzone':   [xdynfile, xdynfile+bak, pd.tmp+'/'+dyfn,    None, True,  False],\
-               '52revdynzone':[xrdynfile, xrdynfile+bak,pd.tmp+'/'+rdyfn,  None, True,  False]}
+    #                          file(sys), file(sys).bak, file(tmp),        RT handle, Site-flag, Make-Copy, Don't-Delete-if
+    pd.fns = { '11hosts':     [xhfile,  xhfile+bak,  pd.tmp+'/'+hfn,       None, False, True,  False],\
+               '21dhcpconf':  [xdhfile, xdhfile+bak, pd.tmp+'/'+dhfn,      None, True,  True,  False],\
+               '22dhcpsubnet':[xdzfile, xdzfile+bak, pd.tmp+'/'+dzfn,      None, False, False, False],\
+               '31bindconf':  [xnofile, xnofile+bak, pd.tmp+'/'+pd.nofile, None, True,  True,  False],\
+               '32blockconf': [xblfile, xblfile+bak, pd.tmp+'/'+blfn,      None, False, False, False],\
+               '41domzone':   [xzfile,  xzfile+bak,  pd.tmp+'/'+zfn,       None, False, False, False],\
+               '42revdomzone':[xrzfile, xrzfile+bak, pd.tmp+'/'+rzfn,      None, False, False, False],\
+               '43blockzone': [xbzfile, xbzfile+bak, pd.tmp+'/'+bzfn,      None, True,  False, False],\
+               '51dynzone':   [xdynfile, xdynfile+bak, pd.tmp+'/'+dyfn,    None, False, False, True],\
+               '52revdynzone':[xrdynfile, xrdynfile+bak,pd.tmp+'/'+rdyfn,  None, False, False, True]}
 
 def dbloadfile(pd, args, ckcfg):
     if args.db == None:
@@ -833,15 +835,17 @@ def cmd_install(pd, args):
         if pd.db['cfg']['os'] != "raspbian": perrorexit("? --chroot not supported on '{}'".format(pd.db['cfg']['os']))
         if svcs[pd.dnsrv]: perrorexit("? Please 'systemctl stop bind9' before applying --chroot")
         return chrootconfig(pd, args)
-    zoneinstall(pd, args)
-    siteinstall(pd, args, svcs)
     stopservices(pd, svcs)
     if args.reset:
         # Delete jnl files and dhcp lease files
+        qdelfile("{}".format(pd.fns['51dynzone'][fnsname]))
         qdelfile("{}.jnl".format(pd.fns['51dynzone'][fnsname]))
+        qdelfile("{}".format(pd.fns['52revdynzone'][fnsname]))
         qdelfile("{}.jnl".format(pd.fns['52revdynzone'][fnsname]))
         qdelfile("{}/dhcpd.leases".format(pd.leasedir))
         qdelfile("{}/dhcpd.leases~".format(pd.leasedir))
+    zoneinstall(pd, args)
+    siteinstall(pd, args, svcs)
     startservices(pd, svcs, True)
     return True
 
