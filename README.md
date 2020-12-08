@@ -35,7 +35,7 @@ Since my specific network is fully supported, I'm good :) :) However, there are 
 * Only /24 networks are supported. This includes 192.168.n.* for any 'n'. 
 * No IPV6 support
 * ndm is fully tested and supported on RasPiOS (Stretch and Buster). Other distros require minor work (config file names/locations).
-* Nameserver failover, although this can be done with an external script. See section "Nameserver failover")
+* Nameserver failover, although this can be done with an external script. See section "Nameserver failover" below.
 
 ## Installing on RasPiOS
 
@@ -50,6 +50,7 @@ Perform the following steps to install ndm on RasPiOS:
     * `sudo apt-get update`
     * `sudo apt-get install bind9 isc-dhcp-server`
     * `sudo systemctl stop isc-dhcp-server` &mdash; For some bizarre reason, the installer starts an unconfigured dhcp server. Stop it so it can be configured.
+    * `sudo systemctl stop bind9` &mdash; Bind9 starts as well, completely unconfigured. Not very useful, so stop it.
 
 * sudo edit /etc/default/isc-dhcp-server to set the INTERFACESV4 setting, e.g., INTERFACESv4=eth0
 
@@ -232,7 +233,7 @@ The argument can be an IP address (must fully match), part of a MAC address, or 
 
 ## Domain name behavior
 
-When properly configured, you can refer to hosts on your network by their hostname, or by their fully qualified domain name. Both will work. For instance, a host named 'server1' in a domain named 'mydomain.com' can be refered to as server1, or as server1.mydomain.com
+When properly configured, you can refer to hosts on your network by their hostname, or by their fully qualified domain name. Both will work. For instance, a host named 'server1' in a domain named 'mydomain.com' can be refered to as server1, or as server1.mydomain.com. Note that this behavior requires that all the clients in the network have mydomain.com in their domain search list. ndm sets this up for dynamically-assigned hosts, but if the computer has an IP address assigned without the use of ndm (e.g., systemd-networkd or dhcpcd), /etc/resolv.conf must be set manually.
 
 The dns database that ndm sets up is completely independent of any dns database on the public internet. For instance, if you have a public domain 'mydomain.com', then looking up server1.mydomain.com on the public internet would most likely refer to a public IP addrress, while looking up server1.mydomain.com on your internal network would refer to a private (e.g., non-public) address, such as 192.168.42.5.
 
@@ -288,9 +289,50 @@ By default, the name server is configured to only accept requests from the host 
 
 For instance, if my VPN provides client IP addresses in subnet 10.42.10.0/24, I would use `ndm config --internals 10.42.10.0/24`, and ndm will add that subnet to the list of subnets allowed to query the name server.
 
+## Nameserver Failover
+
+ndm currently doesn't support highly available DNS or DHCP servers. However, the complete network database configuration is kept in a single file (/etc/dbndm.json). I use a manual failover technique with a hot standby. My standby checks for updates to the database at regular intervals, and updates it's copy of the database as needed. While the DNS server on the hot standby can always be running, the DHCP server cannot. Only start it if the primary fails.
+
+Here's the script I use:
+
+
+    #!/bin/bash
+
+    #
+    # Prior maindns dbndm.json: /var/local/maindns-dbndm.json
+    # Prior hotstandby dbndm.json: /var/local/hotstandby-dbndm.json
+    #
+    # ** for testing if diff /rpi/maindns/etc/dbndm.json /rpi/maindns/etc/dbndm.json
+    if diff /var/local/maindns-dbndm.json /maindns-etc/dbndm.json ##> /dev/null 2&>1
+    then
+        logger "ndmsync dbndm.json unchanged"
+    else
+        logger "ndmsync dbndm.json has changed; Updating..."
+        [ -f /var/local/hotstandby-dbndm.json ] && rm -f /var/local/hotstandby-dbndm.json
+        cp /etc/dbndm.json /var/local/hotstandby-dbndm.json
+        cp /maindns-etc/dbndm.json /etc
+        [ -f /var/local/maindns-dbndm.json ] && rm -f /var/local/maindns-dbndm.json
+        cp /etc/dbndm.json /var/local/maindns-dbndm.json
+        # Need to change:
+        # dnsip, myip, timeserver, hostfqdn, dnsfqdn, mxfqdn, any dhcphostopts referring to maindns
+        myip=$(hostname -I)
+        myfqdn="$(hostname).mydomain.me"
+        ndm config --dnsip $myip --myip $myip --timeserver $myip
+        ndm config --dnsfqdn $myfqdn --hostfqdn $myfqdn --mxfqdn $myfqdn
+        #ndm config --dhcphostopt "x1=option domain-name-servers 192.168.42.7, $myip;" #Example only!
+        ndm build
+        ndm install
+        logger "ndmsync dbndm.json updated"
+    fi
+
+This is ideal for a network with all hosts having DHCP-server assigned static addresses. It should work OK on small networks without many dynamically-assigned DHCP addresses. However, if there are more devices wanting dynamically-assigned DHCP addresses, there could likely be issues.
+
+On the other hand, if you require 100% availability, that's not possible without more work. Please let me know if you're interested in this; it would help inspire me to do something about it.
+
+
 ## Using ndm with Pi-Hole
 
-If you want to run ndm and bind/dhcpd on the same system as Pi-Hole, here are the steps. Basic testing has been done with both running on the same system.
+If you want to run ndm and bind/dhcpd on the same system as Pi-Hole, here are the steps. Basic testing has been done with both running on the same system. Pi-Hole generally encourages dnsmasq, so this is only recommended if you have a hankering for a fully transparent, DNS/DHCP subsystem that can be managed with command lines and scripts, rather than editing config files. It's all personal preference!
 
 * Install and configure Pi-Hole per the Pi-Hole documentation
 * Install and configure bind, dhcpd, and ndm per this document
@@ -331,15 +373,15 @@ Known configuration issues:
     * If dnsip and/or myip are set to 127.0.0.1, correct them: `ndm config --dnsip my.ip.ad.dr --myip my.ip.ad.dr` for the fixed IP address that you have statically assigned and configured for this host.
     * Why is this? There isn't a good way to reliably get the hosts's IP address if the name service is not fully configured. The only ways that I've found either require internet access, other knowledge about the network, installing additional Python packages, or parsing command output. If there's a Pythonic way to reliably get the host's ethernet adapter real IP address, please let me know!
 
-* /etc/resolv.conf changes unexpectedly. This might occur if you are using dhcpcd or NetworkManager, and have established alternate network configurations. DNS and DHCP are server services, so the host running them should only have one network configuration, the static IP address.
+* /etc/resolv.conf changes unexpectedly on the sdm/DNS/DHCP server. This might occur if you are using dhcpcd or NetworkManager, and have established alternate network configurations. DNS and DHCP are server services, so the host running them should only have one network configuration, the static IP address.
 
 ## Distro-specific Notes
 
 This section includes a few notes on using ndm on various Linux distributions
 
-### Raspbian Stretch and RasPiOS Buster and later
+### Raspbian Stretch and RasPiOS Buster and later (oh, and probably Debian)
 
-Raspbian Stretch, RasPiOS Buster, and later are fully-supported by ndm as documented above.
+Raspbian Stretch, RasPiOS Buster, and later are fully-supported by ndm as documented above. This should absolutely work on Debian, and probably on Ubuntu, although I have not tested either of them.
 
 ### OpenSuse Leap 42.0
 
