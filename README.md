@@ -378,7 +378,7 @@ Known configuration issues:
 
 * /etc/resolv.conf changes unexpectedly on the sdm/DNS/DHCP server. This might occur if you are using dhcpcd or NetworkManager, and have established alternate network configurations. DNS and DHCP are server services, so the host running them should only have one network configuration, the static IP address.
 
-##Introducing a new DHCP Server onto your Network
+## Introducing a new DHCP Server onto your Network
 
 It is VERY BAD to have two DHCP servers enabled on the same network at the same time, as it can lead to multiple hosts with the same IP address. That said, there are ways to start a second DHCP server for testing. Here are some ideas to help you test your new DHCP server before you make the switch permanent.
 
