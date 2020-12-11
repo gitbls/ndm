@@ -92,58 +92,58 @@ Create the database and configure it. The examples in this document use subnet 1
 
 * Create and configure the database
 
-    * **Create** the ndm database, /etc/dbndm.json: `ndm config --create --myip 192.168.42.2`
+    * **Create** the ndm database, /etc/dbndm.json: `sudo ndm config --create --myip 192.168.42.2` &mdash; This will create the database and add the current host to it with its current IP Address.
     * The remainder of these commands establish the configuration. Adjust as needed for your network. *Subnet*, *gateway*, *externaldns*, and *timeserver* must be given as IP addresses. Likewise, *dhcpsubnet* is specified as two IP addresses separated by a space, and is a range of IP addresses on your network. *dnsfqdn* and *mxfqdn* must be provided as fully qualified domain names (hostname.domain).
  
-        * `ndm config --subnet 192.168.42 --dhcpsubnet "192.168.42.64 192.168.42.128"`
-        * `ndm config --gateway 192.168.42.1 --timeserver 192.168.42.2 --externaldns 1.1.1.1,1.0.0.1 `
-        * `ndm config --domain mydomain.com --dnsfqdn mypi.mydomain.com --mxfqdn mypi.mydomain.com`
+        * `sudo ndm config --subnet 192.168.42 --dhcpsubnet "192.168.42.64 192.168.42.128"`
+        * `sudo ndm config --gateway 192.168.42.1 --timeserver 192.168.42.2 --externaldns 1.1.1.1,1.0.0.1 `
+        * `sudo ndm config --domain mydomain.com --dnsfqdn mypi.mydomain.com --mxfqdn mypi.mydomain.com`
 
-    * Display the ndm configuration: `ndm config --list`
+    * Display the ndm configuration: `sudo ndm config --list`
 
 * **Add** your hosts, either via a set of ndm commands or by importing a properly formatted network database. See "Importing a network database" and "Day-to-day management tasks" below. Note that ndm will automatically add the hostname of the system on which it is running to the database.
 
-    * `ndm add 192.168.42.4 --hostname mypitest --mac nn:nn:nn:nn:nn:nn --note "RPi for testing"`
+    * `sudo ndm add 192.168.42.4 --hostname mypitest --mac nn:nn:nn:nn:nn:nn --note "RPi for testing"`
 
-* **Build** the dns and dhcpd configuration files into a directory in /tmp: `ndm build`
-* **Install** the dns and dhcpd configuration files: `ndm install`
-* **Start** bind and dhcpd: `systemctl start bind9; systemctl start isc-dhcp-server`
+* **Build** the dns and dhcpd configuration files into a directory in /tmp: `sudo ndm build`
+* **Install** the dns and dhcpd configuration files: `sudo ndm install`
+* **Start** bind and dhcpd: `sudo systemctl start bind9; sudo systemctl start isc-dhcp-server` **NOTE:** Please read the section "Introducing a new DHCP Server onto your Network" at the end of this README BEFORE you start your new DHCP server.
 * Resolve any errors identified in the system log
 
 ## When do I need to do an ndm build/install?
 
-Any changes you make to the `ndm config` settings or add/modify/delete a host require that you do `ndm build` and `ndm install` for them to take effect in the running system.
+Any changes you make to the `sudo ndm config` settings or add/modify/delete a host require that you do `sudo ndm build` and `sudo ndm install` for them to take effect in the running system.
 
 ## Day-to-day management tasks
 
 ### Adding a host
 
-* `ndm add 192.168.42.3 --mac nn:nn:nn:nn:nn:nn --hostname printserver` &mdash; Adds a new host named *printserver* to the ndm database. *printserver* has IP address 192.168.42.3 and the specified MAC Address. If *printserver* is configured to request an IP address via dhcp, it will always get 192.168.42.3
-* `ndm build` &mdash; Builds the updated config files (but doesn't install them into the system)
-* `ndm diff` &mdash; (optional). Displays the differences between the current in-use config files and the newly-created config files.
-* `ndm install` &mdash; Installs the updated config files into the system and stops/starts bind and dhcpd
+* `sudo ndm add 192.168.42.3 --mac nn:nn:nn:nn:nn:nn --hostname printserver` &mdash; Adds a new host named *printserver* to the ndm database. *printserver* has IP address 192.168.42.3 and the specified MAC Address. If *printserver* is configured to request an IP address via dhcp, it will always get 192.168.42.3
+* `sudo ndm build` &mdash; Builds the updated config files (but doesn't install them into the system)
+* `sudo ndm diff` &mdash; (optional). Displays the differences between the current in-use config files and the newly-created config files.
+* `sudo ndm install` &mdash; Installs the updated config files into the system and stops/starts bind and dhcpd
 
 ### Adding an external host to /etc/hosts
 
-* `ndm add 12.10.2.1 --hostname example.some.com --hostsonly --nodomain` &mdash; Adds the entry to /etc/hosts. This is useful for names that need to be made available early in the boot process.
-    * As with the first example, an `ndm build` and `ndm install` must be performed.
+* `sudo ndm add 12.10.2.1 --hostname example.some.com --hostsonly --nodomain` &mdash; Adds the entry to /etc/hosts. This is useful for names that need to be made available early in the boot process.
+    * As with the first example, an `sudo ndm build` and `sudo ndm install` must be performed.
 
-* `ndm add 192.168.42.12 --mac 4c:01:44:77:11:10 --hostname eerobase --note "eero in wiring closet"` &mdash; Eero sends multiple dhcp requests on different MAC addresses. I found that they can use the same IP address, so I use these two commands to force that. The second entry is only in the dhcpd config file, and not present in the dhcp zone or /etc/hosts files.
-    * `ndm add 192.168.42.12 --mac 4c:01:44:77:11:22 --hostname eerobasex --dhcponly` &mdash; This is the second MAC address on the eero. This enables the dhcp server to respond to it, but the hostname is not made visible in dns.
+* `sudo ndm add 192.168.42.12 --mac 4c:01:44:77:11:10 --hostname eerobase --note "eero in wiring closet"` &mdash; Eero sends multiple dhcp requests on different MAC addresses. I found that they can use the same IP address, so I use these two commands to force that. The second entry is only in the dhcpd config file, and not present in the dhcp zone or /etc/hosts files.
+    * `sudo ndm add 192.168.42.12 --mac 4c:01:44:77:11:22 --hostname eerobasex --dhcponly` &mdash; This is the second MAC address on the eero. This enables the dhcp server to respond to it, but the hostname is not made visible in dns.
 
 ### Deleting a host
 
-* `ndm delete 192.168.42.17` &mdash; Deletes the entry with IP address 192.168.42.17 from the database.
-* As with the first example, an `ndm build` and `ndm install` must be performed.
+* `sudo ndm delete 192.168.42.17` &mdash; Deletes the entry with IP address 192.168.42.17 from the database.
+* As with the first example, an `sudo ndm build` and `sudo ndm install` must be performed.
 
 ### Modifying a host
 
-* `ndm modify 192.168.42.3 --note "New server 2018-12-04" --mac mm:mm:mm:mm:mm:mm`
-* As with the first example, an `ndm build` and `ndm install` must be performed.
+* `sudo ndm modify 192.168.42.3 --note "New server 2018-12-04" --mac mm:mm:mm:mm:mm:mm`
+* As with the first example, an `sudo ndm build` and `sudo ndm install` must be performed.
 
 ### Changing the IP address for a host
 
-* `ndm reip 192.168.42.7 --newip 192.168.42.3` &mdash; Changes the IP address for all hostnames associated with the old IP address. `ndm build` and `ndm install` must be performed.
+* `sudo ndm reip 192.168.42.7 --newip 192.168.42.3` &mdash; Changes the IP address for all hostnames associated with the old IP address. `sudo ndm build` and `sudo ndm install` must be performed.
 
 ## Detailed command information
 
@@ -155,14 +155,14 @@ You only need to do this if the host will have a fixed IP address, or it require
 
 To add a simple device to the database, use 
 
-`ndm add 192.168.42.4 --hostname mypitest --mac nn:nn:nn:nn:nn:nn `
+`sudo ndm add 192.168.42.4 --hostname mypitest --mac nn:nn:nn:nn:nn:nn `
 
 The MAC address is necessary so that dhcpd can assign it a fixed address. It is not necessary for any devices that have dynamically assigned IP addresses from the pool.
 
 The switches to the *add* command provide flexibility and control over the host entry. Every ndm command has help like this available. 
 
 ```
-bash$ ndm add --help
+bash$ sudo ndm add --help
 usage: ndm add [-h] [--cname] [--db DB] [--dhcphostopt DHCPHOSTOPT]
                [--dhcponly] [--hostname HOSTNAME] [--hostsonly] [--mac MAC]
                [--nodhcp] [--nodomain] [--note NOTE] [--zoneonly]
@@ -191,15 +191,15 @@ optional arguments:
                         or hosts file)
 ```
 
-To add a CNAME record, use: `ndm add cnamestring --hostname cnamevalue.mydomain.com. --cname`. (note the trailing ".") This will create a CNAME record for *cnamestring*, and it's value is *cnamevalue.mydomain.com.*
+To add a CNAME record, use: `sudo ndm add cnamestring --hostname cnamevalue.mydomain.com. --cname`. (note the trailing ".") This will create a CNAME record for *cnamestring*, and it's value is *cnamevalue.mydomain.com.*
 
 **build &mdash;** Build the dns and dhcp config files from the database
 
-The files are created in a temporary directory and are not in use until you `ndm install` (which stops/restarts the dhcp and dns servers). The temporary directory is /tmp/ndm.*username*, but  can be changed with the --tmp switch. If you change the temporary directory for the *build* command, you also must change it for the *diff* and *install* commands.
+The files are created in a temporary directory and are not in use until you `sudo ndm install` (which stops/restarts the dhcp and dns servers). The temporary directory is /tmp/ndm.*username*, but  can be changed with the --tmp switch. If you change the temporary directory for the *build* command, you also must change it for the *diff* and *install* commands.
 
 **config &mdash;** Manage the ndm configuration database
 
-The *config* command controls the site configuration database, and is used to do bulk import of host definitions. See the section "Importing a network database" below for details on bulk importing. An *ndm config* command with no switches defaults to `ndm config --list`.
+The *config* command controls the site configuration database, and is used to do bulk import of host definitions. See the section "Importing a network database" below for details on bulk importing. An *ndm config* command with no switches defaults to `sudo ndm config --list`.
 
 **delete &mdash;** Delete an entry from the database
 
@@ -211,13 +211,13 @@ Use the *diff* command to verify the changes in the newly-created config files a
 
 **install &mdash;** Install the configuration files created by the *build* command
 
-installs the generated configuration.**Note:** No running system configuration files are changed until an *ndm install* is done.
+installs the generated configuration.**Note:** No running system configuration files are changed until an *sudo ndm install* is done.
 
-The `ndm install --reset` command resets all the dhcp and bind configurations to the just-initialized state. All dynamic zone definitions are removed, as are all DHCP leases. This is primarily for testing, but can be used with care on live networks. Best practice is to have all hosts with statically-assigned DHCP-requested addresses. 
+The `sudo ndm install --reset` command resets all the dhcp and bind configurations to the just-initialized state. All dynamic zone definitions are removed, as are all DHCP leases. This is primarily for testing, but can be used with care on live networks. Best practice is to have all hosts with statically-assigned DHCP-requested addresses. 
 
 **list &mdash;** List all entries in the database.
 
-If --dump is specified, the output is in *ndm import* format, which can be loaded into ndm with the `ndm config --importnet` command.
+If --dump is specified, the output is in *ndm import* format, which can be loaded into ndm with the `sudo ndm config --importnet` command.
 
 **modify &mdash;** Modify an existing host entry
 
@@ -243,25 +243,25 @@ Use *dhcphostopt* to configure PXE or other host-specific DHCP options. For each
 
 For example: 
 
-`ndm config --dhcphostopt 'PXE=next-server 192.168.42.3; filename "pxelinux.0";'`
+`sudo ndm config --dhcphostopt 'PXE=next-server 192.168.42.3; filename "pxelinux.0";'`
 
-`ndm config --dhcphostopt "DNSX=option domain-name-servers 192.168.42.4, 1.0.0.1;"`
+`sudo ndm config --dhcphostopt "DNSX=option domain-name-servers 192.168.42.4, 1.0.0.1;"`
 
 If you want to change the text of a dhcphostopt simply re-enter the command with the new replacement string. Leave the replacement string blank if you want to delete a dhcphostopt (e.g., `ndm config --dhcphostopt "DNSX="`). Don't forget the trailing semicolon as in the examples, as these are required by the dhcp config file syntax.
 
 Apply the dhcphostopt setting as desired to specific hosts:
 
-`ndm modify 192.168.42.17 --dhcphostopt PXE`
+`sudo ndm modify 192.168.42.17 --dhcphostopt PXE`
 
-`ndm modify 192.168.42.18 --dhcphostopt PXE,DNSX`
+`sudo ndm modify 192.168.42.18 --dhcphostopt PXE,DNSX`
 
 If a dhcphostopt has been applied to a host but there is no dhcphosthopt configuration for the specified dhcphostopt, ndm will warn you, but continue.
 
-As always, after a host configuration has been modified, do an `ndm build` and `ndm install`.
+As always, after a host configuration has been modified, do an `sudo ndm build` and `sudo ndm install`.
 
 ## Importing a network database
 
-Use the command `ndm config --import` to import a properly formatted database. The importer does not do much syntax checking, so be sure to check the results very carefully. The import database format is
+Use the command `sudo ndm config --import` to import a properly formatted database. The importer does not do much syntax checking, so be sure to check the results very carefully. The import database format is
 
 IPaddr,MACaddr,hostname,flags,Note,dhcphostopt,
 
@@ -281,19 +281,19 @@ The flags correspond to the command-line switches of the *add command*. When inc
 * *zoneonly*: Only put this host in the dns zone file (do not add to dhcpd.conf or /etc/hosts)
 * *nodomain*: Don't add the domain name to the host in /etc/hosts. Use this if you have an FQDN name for a host outside your domain.
 
-Once the network database has been successfully imported, do a `ndm build` and `ndm install`.
+Once the network database has been successfully imported, do a `sudo ndm build` and `sudo ndm install`.
 
 ## Using ndm with multiple LAN subnets or a VPN
 
-By default, the name server is configured to only accept requests from the host on which the name server is running, and any hosts in the subnet specified by --subnet. If you're using multiple LAN subnets or have a VPN installed that will use your DNS server for name services, you must specify the additional subnets using the `ndm config --internals` command. 
+By default, the name server is configured to only accept requests from the host on which the name server is running, and any hosts in the subnet specified by --subnet. If you're using multiple LAN subnets or have a VPN installed that will use your DNS server for name services, you must specify the additional subnets using the `sudo ndm config --internals` command. 
 
-For instance, if my VPN provides client IP addresses in subnet 10.42.10.0/24, I would use `ndm config --internals 10.42.10.0/24`, and ndm will add that subnet to the list of subnets allowed to query the name server.
+For instance, if my VPN provides client IP addresses in subnet 10.42.10.0/24, I would use `sudo ndm config --internals 10.42.10.0/24`, and ndm will add that subnet to the list of subnets allowed to query the name server.
 
 ## Nameserver Failover
 
 ndm currently doesn't support highly available DNS or DHCP servers. However, the complete network database configuration is kept in a single file (/etc/dbndm.json). I use a manual failover technique with a hot standby. My standby checks for updates to the database at regular intervals, and updates it's copy of the database as needed. While the DNS server on the hot standby can always be running, the DHCP server cannot. Only start it if the primary fails.
 
-Here's the script I use:
+Here's the script I use, which must be run with sudo:
 
 
     #!/bin/bash
@@ -336,8 +336,8 @@ If you want to run ndm and bind/dhcpd on the same system as Pi-Hole, here are th
 
 * Install and configure Pi-Hole per the Pi-Hole documentation
 * Install and configure bind, dhcpd, and ndm per this document
-* Modify the ndm configuration to use a different TCP port for dns: `ndm config --dnslistenport newport`. Pi-Hole will listen on port 53 (the default dns port), so select another port less than 1024.
-* `ndm build` and `ndm install` the updated configuration
+* Modify the ndm configuration to use a different TCP port for dns: `sudo ndm config --dnslistenport newport`. Pi-Hole will listen on port 53 (the default dns port), so select another port less than 1024.
+* `sudo ndm build` and `sudo ndm install` the updated configuration
 * Configure any hosts with static IP address as documented above.
 * In the Pi-Hole configuration, establish an external dns server: TBD
 * Test. Just like I need to do before this is released :)
@@ -369,11 +369,22 @@ Known configuration issues:
 
 * Name resolution doesn't work as expected after the first build/install has been completed - This is typically caused by either dnsip or myip being incorrectly set to 127.0.0.1 instead of the actual host IP address. To correct:
 
-    * Check ndm settings: `ndm config`
-    * If dnsip and/or myip are set to 127.0.0.1, correct them: `ndm config --dnsip my.ip.ad.dr --myip my.ip.ad.dr` for the fixed IP address that you have statically assigned and configured for this host.
+    * Check ndm settings: `sudo ndm config`
+    * If dnsip and/or myip are set to 127.0.0.1, correct them: `sudo ndm config --dnsip my.ip.ad.dr --myip my.ip.ad.dr` for the fixed IP address that you have statically assigned and configured for this host.
     * Why is this? There isn't a good way to reliably get the hosts's IP address if the name service is not fully configured. The only ways that I've found either require internet access, other knowledge about the network, installing additional Python packages, or parsing command output. If there's a Pythonic way to reliably get the host's ethernet adapter real IP address, please let me know!
 
 * /etc/resolv.conf changes unexpectedly on the sdm/DNS/DHCP server. This might occur if you are using dhcpcd or NetworkManager, and have established alternate network configurations. DNS and DHCP are server services, so the host running them should only have one network configuration, the static IP address.
+
+##Introducing a new DHCP Server onto your Network
+
+It is VERY BAD to have two DHCP servers enabled on the same network at the same time, as it can lead to multiple hosts with the same IP address. That said, there are ways to start a second DHCP server for testing. Here are some ideas to help you test your new DHCP server before you make the switch permanent.
+
+* When you're ready to test your new ndm-powered DHCP server, turn off the DHCP server on your router (or wherever it is).
+* The other approach for temporary co-existence is to ensure that the two DHCP servers are assigning hosts from different address pools. For instance, if your router is assigning addresses in the 192.168.xx.100-192.168.xx.200 range, you could configure your ndm-powered DHCP server to use .201-.255. The problem with this approach is that you don't know beforehand which DHCP server will respond to a request.
+* Once you've implemented one of the two above techniques (or both!), you can start the ndm-powered DHCP server. 
+* The system log is your friend. Use `sudo journalctl | grep dhcp | less` to see all of the DHCP address requests and responses, and `sudo journalctl -f | grep dhcp` to watch the requests arriving in real time. 
+* When you're satisfied with the operation, reconfigure the ndm DHCP server's address pool if needed (`sudo ndm config --dhcpsubnet`), and then `sudo systemctl restart isc-dhcp-server` to start it.
+* Don't forget to `sudo systemctl enable bind9' AND `sudo systemctl enable isc-dhcp-server` so both services start when the system restarts.
 
 ## Distro-specific Notes
 
