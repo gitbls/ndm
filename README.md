@@ -51,6 +51,9 @@ Perform the following steps to install ndm on RasPiOS:
     * `sudo apt-get install bind9 isc-dhcp-server`
     * `sudo systemctl stop isc-dhcp-server` &mdash; For some bizarre reason, the installer starts an unconfigured dhcp server. Stop it so it can be configured.
     * `sudo systemctl stop bind9` &mdash; Bind9 starts as well, completely unconfigured. Not very useful, so stop it.
+    * I **strongly** recommend that you disable the DHCP server (`sudo systemctl disable isc-dhcp-server`) until you're ready to go live with it.
+
+        You'll still be able to stop and start the service, but this will ensure that the service doesn't *accidentally* start after a reboot. When you're ready to go live with it you can enable and start it with `sudo systemctl enable --now isc-dhcp-server`.
 
 * sudo edit /etc/default/isc-dhcp-server to set the INTERFACESV4 setting, e.g., INTERFACESv4=eth0
 
@@ -88,7 +91,7 @@ static domain_name_servers=192.168.42.2
 
 ## Creating the ndm configuration
 
-Create the database and configure it. The examples in this document use subnet 192.168.42.0/24. Adjust this as appropriate for your network configuration. It also assumes that computer mypi is at 192.168.42.2 and is running ntp (time service) and a mail server as well as ndm/dns/dhcp. **Note:**ndm does not require a mail server. If your network does not have a mail server, simply use the name of your ndm/dns/dhcp server as the mail server to keep bind happy.
+Create the database and configure it. The examples in this document use subnet 192.168.42.0/24. Adjust this as appropriate for your network configuration. It also assumes that computer mypi is at 192.168.42.2 and is running ntp (time service) and a mail server as well as ndm/dns/dhcp. **Note:** ndm does not require a mail server. If your network does not have a mail server, simply use the name of your ndm/dns/dhcp server as the mail server to keep bind happy.
 
 * Create and configure the database
 
