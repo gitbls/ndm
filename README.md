@@ -11,6 +11,8 @@ ndm Bind9 and isc-dhcp-server subnet configuration management
 * Easily name your own home network domain.
 * The ndm database and configuration is maintained in a single, portable file, so it's easy to backup and restore.
 
+If you find ndm useful, please consider starring it to help me understand how many people are using it. Thanks!
+
 **ndm capabilities include**
 
 * Maintain and easily update dns and dhcpd configuration files and /etc/hosts 
@@ -131,7 +133,7 @@ Any changes you make to the `sudo ndm config` settings or add/modify/delete a ho
 * `sudo ndm add 12.10.2.1 --hostname example.some.com --hostsonly --nodomain` &mdash; Adds the entry to /etc/hosts. This is useful for names that need to be made available early in the boot process.
     * As with the first example, an `sudo ndm build` and `sudo ndm install` must be performed.
 
-* `sudo ndm add 192.168.42.12 --mac 4c:01:44:77:11:10 --hostname eerobase --note "eero in wiring closet"` &mdash; Eero sends multiple dhcp requests on different MAC addresses. I found that they can use the same IP address, so I use these two commands to force that. The second entry is only in the dhcpd config file, and not present in the dhcp zone or /etc/hosts files.
+* `sudo ndm add 192.168.42.12 --mac 4c:01:44:77:11:10 --hostname eerobase --note "eero in wiring closet"` &mdash; Eero sends multiple dhcp requests on different MAC addresses. I found that they can use the same IP address, so I use these two commands to force that. The second entry is only in the dhcpd config file, and not present in the dns zone or /etc/hosts files.
     * `sudo ndm add 192.168.42.12 --mac 4c:01:44:77:11:22 --hostname eerobasex --dhcponly` &mdash; This is the second MAC address on the eero. This enables the dhcp server to respond to it, but the hostname is not made visible in dns.
 
 ### Deleting a host
@@ -270,8 +272,8 @@ IPaddr,MACaddr,hostname,flags,Note,dhcphostopt,
 
 For instance
 
-`192.168.42.2,nn:nn:nn:nn:nn:nn,mypi,Pi next to the router,PXE,`
-`192.168.42.3,nn:nn:nn:nn:nn:nn,mywin,My Windows desktop,,`
+    192.168.42.2,nn:nn:nn:nn:nn:nn,mypi,Pi next to the router,PXE,
+    192.168.42.3,nn:nn:nn:nn:nn:nn,mywin,My Windows desktop,,
 
 The flags correspond to the command-line switches of the *add command*. When included in the network database import file, I suggest prefixing them with a plus sign for readability. For example:
 
@@ -387,7 +389,7 @@ It is VERY BAD to have two DHCP servers enabled on the same network at the same 
 * Once you've implemented one of the two above techniques (or both!), you can start the ndm-powered DHCP server. 
 * The system log is your friend. Use `sudo journalctl | grep dhcp | less` to see all of the DHCP address requests and responses, and `sudo journalctl -f | grep dhcp` to watch the requests arriving in real time. 
 * When you're satisfied with the operation, reconfigure the ndm DHCP server's address pool if needed (`sudo ndm config --dhcpsubnet`), and then `sudo systemctl restart isc-dhcp-server` to start it.
-* Don't forget to `sudo systemctl enable bind9' AND `sudo systemctl enable isc-dhcp-server` so both services start when the system restarts.
+* Don't forget to `sudo systemctl enable bind9` AND `sudo systemctl enable isc-dhcp-server` so both services start when the system restarts.
 
 ## Distro-specific Notes
 
