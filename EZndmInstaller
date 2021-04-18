@@ -1,0 +1,129 @@
+#!/bin/bash
+#
+# EZ Installer. Run from the bash command line:
+#
+#    curl -L https://raw.githubusercontent.com/gitbls/ndm/master/EZndmInstaller | bash
+#
+# Installs into /usr/local/bin by default
+# If you specify a different directory (first argument), it assumes that sudo is not required
+#
+
+function errexit() {
+    echo "$1"
+    exit 1
+}
+
+function ezpause() {
+    local ans
+    echo -en "$1" ; read $2 ans
+}
+
+#
+# Download ndm
+#
+[ "$1" == "" ] && dir="/usr/local/bin" || dir="$1"
+[ "$NDMLAN" == "" ] && src="https://raw.githubusercontent.com/gitbls/ndm/master" || src=$NDMLAN
+[ "$dir" == "/usr/local/bin" ] && sudo="sudo" || sudo=""
+[ $UID -eq 0 ] && sudo=""
+[ "$NDMTEST" == "" ] && cpx="scp" || cpx="cp"
+
+[ ! -d $dir ] && errexit "? Directory '$dir' does not exist"
+echo "Downloading ndm from '$src'..."
+flist="ndm ndmdnsbind.py ndmdnsmasq.py ndmdhcpisc.py ndmdhcpnone.py"
+for f in $flist
+do
+    echo "Downloading '$f' to '$dir/$f'"
+    [ -f $dir/$f ] && rm -f $dir/$f
+    if [ "$NDMLAN" == "" ]
+    then
+	$sudo curl --silent --show-error --fail -L $src/$f -o $dir/$f
+    else
+	$cpx $NDMLAN/$f $dir/$f
+    fi
+    sts=$?
+    [ $sts != 0 ] && errexit "? Error copying '$f'"
+    $sudo chmod 755 $dir/$f
+done
+ezpause "\nPress Enter when you are ready to continue\n(Getting started information will be printed) "
+#
+# Finish up with some guidance
+#
+
+echo $"
+ndm is installed on your system.
+
+If you haven't already done so, you must install a DHCP and DNS server.
+ndm current supports:
+
+* bind9 and isc-dhcp-server for DNS and DHCP respectively
+* dnsmasq for both DNS and DHCP services
+
+bind9 and isc-dhcp-server have more features, but dnsmasq works quite well
+with somewhat less capabilities.
+
+For most, the choice is personal preference, unless you need specific features. ndm makes it fairly
+easy to switch from one to the other, so you aren't permanently locked into your decision.
+
+It's good practice to make sure that the services (bind9, isc-dhcp-server, and dnsmasq)
+are disabled (especially the DHCP server!) until you're ready to actually test the
+services. This is true whether you're using ndm or not.
+
+ndm operates independently of the DNS and DHCP services, except when an 'sudo ndm install' is done.
+
+Here's how to create and configure the database. See the the github page or
+'sudo ndm help' for details on the options
+
+These ndm settings must be configured before a 'build' or 'install' command can be done:
+--dns            'bind' or 'dnsmasq'
+--dhcp           'isc-dhcp-server' or 'dnsmasq'
+--dhcpsubnet     The IP Address range to be used for dynamic DHCP IP Address assignments
+--domain         Domain name for your LAN (default='.me')
+--externaldns    IP addresses of External DNS servers (e.g., 1.1.1.1,1.0.0.1)
+--gateway        IP address of the gateway or router for your LAN
+--timeserver     IP address of the timeserver for your LAN (can be local or internet, local recommended)
+
+for instance:
+
+sudo ndm config --create         # Create the database
+
+# Using dnsmasq. if dnsmasq selected it will be used for both DNS and DHCP
+sudo ndm config --dns dnsmasq \\
+           --dhcp dnsmasq \\
+           --domain mynet.net \\
+           --gateway ip.ad.dr.es \\
+           --timeserver ip.ad.dr.es \\
+           --externaldns 1.1.1.1,1.0.0.1 \\
+           --dhcprange aa.bb.xx.xx,aa.bb.xx.yy
+
+# Using bind for DNS and isc-dhcp-server for DHCP
+sudo ndm config --dns bind \\
+           --dhcp isc-dhcp-server \\
+           --domain mynet.net \\
+           --gateway ip.ad.dr.es \\
+           --timeserver ip.ad.dr.es \\
+           --externaldns 1.1.1.1,1.0.0.1 \\
+           --dhcprange aa.bb.xx.xx,aa.bb.xx.yy
+
+# Add hosts
+sudo ndm add 192.168.x.x --mac ma:ca:dd:re:ss --hostname thishost
+
+# build
+sudo ndm build
+
+# install
+sudo ndm install
+
+# Manually start services and then immediatley stop the service to check for
+# correct configuration. All errors need to be resolved.
+# If you're using bind and isc-dhcp-server start and stop bind and isc-dhcp-server separately
+
+sudo systemctl start dnsmasq  # if using bind, replace dnsmasq with 'bind'
+sudo systemctl stop  dnsmasq  #  and then separately 'isc-dhcp-server'
+
+# enable and then reboot for a final complete test
+
+sudo systemctl enable dnsmasq # Ditto
+
+" | less
+
+exit
