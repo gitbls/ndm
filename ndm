@@ -160,7 +160,7 @@ def loadmodule(pd, modname, dnsordhcp):
 
 class pdat:
     def __init__(self):
-        self.version = "V2.0"
+        self.version = "V2.1"
         self.dbversion = "2"
         self.dns = None
         self.dhcp = None
@@ -319,6 +319,8 @@ class pdat:
             if "CONFIG=" in line:
                 els = line.rstrip().split('=')
                 self.db = json.loads(els[1])
+                if not 'hosts' in self.db: self.db['hosts'] = {}
+                if not 'cname' in self.db: self.db['cname'] = {}
             else:
                 line = "{},,,,,".format(line.split('#')[0].rstrip()) # Extra commas guard against missing stuff on line
                 # Split and get parts: IPAddr[0], macaddr[1], hostname[2], flags[3], note[4], dhcphostopt[5]
