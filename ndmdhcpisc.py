@@ -152,3 +152,4 @@ class ndmdhcp():
         fh.write("    }\n}\n")
         fh.write('include "{}/{}";\n'.format(self.dhcpconfdir, self.subnetfn))
         if self.pd.db['cfg']['dhcpinclude'] != "":fh.write('include "{}";\n'.format(self.pd.db['cfg']['dhcpinclude']))
+        return True
