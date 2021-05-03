@@ -58,9 +58,9 @@ Installation consists of a few simple steps:
 * Build, review, **test**, and install the DNS and DHCP configurations
 
 ### **Copy ndm to your system**
-* `sudo curl -L https://raw.githubusercontent.com/gitbls/sdm/master/EZsdmInstaller | bash`
-    * EZsdmInstaller simply copies the files to /usr/local/bin and then displays some helpful getting started information.
-    * If you want to install ndm to a different directory, download EZsdmInstaller and start it with `sudo EZsdmInstaller /dir/for/install`. 'sudo' only required if needed for /dir/for/install write access.
+* `sudo curl -L https://raw.githubusercontent.com/gitbls/ndm/master/EZndmInstaller | bash`
+    * EZndmInstaller simply copies the files to /usr/local/bin and then displays some helpful getting started information.
+    * If you want to install ndm to a different directory, download EZndmInstaller and start it with `sudo EZndmInstaller /dir/for/install`. 'sudo' only required if needed for /dir/for/install write access.
     * **OR** Copy and execute this bash command
 ```
 for f in ndm ndmdnsbind.py ndmdnsmasq.py ndmdhcpisc.py ndmdhcpnone.py ; do curl -L https://raw.githubusercontent.com/gitbls/ndm/master/$f -o /usr/local/bin/$f ; done
@@ -80,7 +80,7 @@ sudo edit /etc/chrony/chrony.conf and add these two lines to the end of the file
 
 ```
 allow xx.yy.xx.0/24           # Enables your local subnet to access the server
-bindaddress ii.pa.dd.rs       # The IP address of the computer chronyd installed on
+bindaddress ip.ad.dr.ss       # The IP address of the computer chronyd installed on
 ```
 
 If you already have a time server on your network, you'll need to know its IP address (which should be a statically assigned IP address).
@@ -160,8 +160,8 @@ The examples in this document use subnet 192.168.42.0/24. Adjust this as appropr
 * Display and review the ndm configuration: `sudo ndm config --list`
 
 * You must also specify which DNS and DHCP servers to use with the `--dns` and `--dhcp` switches. Legal values are
-        * **DNS:**&nbsp;&nbsp;&nbsp;`--dns bind` and `--dns dnsmasq`
-        * **DHCP:**&nbsp;`--dhcp isc-dhcp-server`, `--dhcp dnsmasq`, or `--dhcp none`
+    * **DNS:**&nbsp;&nbsp;&nbsp;`--dns bind` and `--dns dnsmasq`
+    * **DHCP:**&nbsp;`--dhcp isc-dhcp-server`, `--dhcp dnsmasq`, or `--dhcp none`
     * Your ndm host is now configured for basic operation!
 
 ### Add hosts
@@ -183,8 +183,6 @@ See below for full details for the add command.
 
 Any changes you make to the `sudo ndm config` settings or add/modify/delete a host require that you do `sudo ndm build` and `sudo ndm install` for them to take effect in the running system. Since the configuration build and install are separate operations, you can use `sudo ndm diff` to view the configuration file changes between the current and possible new version.
 
-Unless you are making HUGE changes, you'll get a feel for whether there are likely to be problems when the new version is installed into the system.
-
 ## Day-to-day management tasks
 
 ### Adding a host and update the running configuration
@@ -201,7 +199,7 @@ Of course you can add multiple hosts before doing a build and install.
 * `sudo ndm add 12.10.2.1 --hostname example.some.com --hostsonly --nodomain` &mdash; Adds the entry to /etc/hosts. This is useful for names that need to be made available early in the boot process.
     * As with the first example, an `sudo ndm build` and `sudo ndm install` must be performed for this to take effect.
 
-### Adding hosts with multiple network adapters
+### Adding hosts with multiple network adapters (isc-dhcp-server only)
 
 * `sudo ndm add 192.168.42.12 --mac 4c:01:44:77:11:10 --hostname eerobase --note "eero in wiring closet"` &mdash; Eero sends multiple DHCP requests on different MAC addresses. I found that they can operate using the same IP address, so I use these two commands to force that. The second entry is only in the dhcpd config file, and not present in the DNS zone or /etc/hosts files.
 * `sudo ndm add 192.168.42.12 --mac 4c:01:44:77:11:22 --hostname eerobasex --dhcponly` &mdash; This is the second MAC address on the eero. This enables the DHCP server to respond to it, but the hostname is not made visible in DNS. Note that the second MAC address must have a different hostname than the first one.
@@ -466,6 +464,8 @@ Known configuration issues:
 
 * /etc/resolv.conf changes unexpectedly on the ndm/DNS/DHCP server. This might occur if you are using dhcpcd or NetworkManager, and have established alternate network configurations. DNS and DHCP are server services, so the host running them should only have one network configuration, the static IP address. ndm updates /etc/resolvconf.conf so that everything works as expected, but if another subsystem modifies /etc/resolvconf.conf or /etc/resolv.conf, things could be "interesting".
 
+* If you need to ndm to reconfigure resolvconf: `sudo rm -f /etc/resolvconf.conf.ndm` will cause ndm to regenerate a correct /etc/resolvconf.conf. ndm also saves the original /etc/resolvconf.conf in /etc/resolvconf.conf-orig.ndm. The `resolvconf` program uses /etc/resolvconf.conf to generate /etc/resolv.conf. ndm runs resolvconf to generate the correct /etc/resolv.conf based on your ndm name server configuration.
+
 ## Introducing a new DHCP Server onto the Network
 
 Without careful planning, it can be VERY VERY BAD to have two DHCP servers enabled on the same network at the same time, as it can lead to multiple hosts with the same IP address. This is especially true if new devices are joining/leaving the network frequently, so typically less of a problem on a home network.
@@ -498,10 +498,17 @@ Don't forget to enable the services to start automatically when you're all set t
 
 This section includes a few notes on using ndm on various Linux distributions
 
-### Raspbian Stretch and RasPiOS Buster and later (oh, and probably Debian)
+### Supported OS Distros
 
-Raspbian Stretch, RasPiOS Buster, and later are fully-supported by ndm as documented above. This should absolutely work on Debian, and probably on Ubuntu, although these have not yet been tested.
+`ndm` currently supports the following OS Distros:
+
+* Raspbian Stretch
+* RasPiOS Buster
+* Debian Buster
+* Ubuntu (tested on 21.04, other releases *should* work as well)
+
+Any distro not listed above has not been tested and will not work. If your system is "Debian-like", you could try using `sudo ndm config --os debian`. It really depends on the distro, since the location of system configuration files can and does vary across distros. 
 
 ### Other distros
 
-ndm is mostly distro-independent and can be easily extended. Virtually all the work in supporting an additional distro is in configuring the correct filenames and directories for the bind/named and DHCP config files. Let me know what distro you're interested in!
+`ndm` is mostly distro-independent and can be easily extended. Virtually all the work in supporting an additional distro is in configuring the correct filenames and directories for the bind/named and DHCP config files. Let me know what distro you're interested in!
