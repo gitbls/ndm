@@ -6,24 +6,30 @@ import os
 #
 # Responsible for managing the ISC DHCP Server database
 #
+# Version 2.2
+#
 class ndmdhcp():
     def __init__(self, pd):
         self.pd = pd
         self.tmp = pd.tmp
+        ostype = self.pd.os
+        if not ostype in self.pd.knownos: ostype = 'raspios'
         self.osdetails = { 'raspios': {"dhcpservice":"isc-dhcp-server", "dhcpconfdir":"/etc/dhcp", "dhcpleasedir":"/var/lib/dhcp", "dhcpduser":"root"},\
-                           'opensuse-leap': {"dhcpservice":"dhcpd", "dhcpconfdir":"/etc", "dhcpleasedir":"/var/lib/dhcp/db", "dhcpduser":"dhcpd"},\
-                           'centos': {"dhcpservice":"dhcpd", "dhcpconfdir":"/etc/dhcp", "dhcpleasedir":"/var/lib/dhcpd", "dhcpduser":"dhcpd"}}
-        self.dhsrv = self.osdetails[self.pd.os]['dhcpservice']
-        self.dhcpuser = self.osdetails[self.pd.os]['dhcpduser']
-        self.dhcpconfdir = self.osdetails[self.pd.os]['dhcpconfdir']
-        self.dhcpleasedir = self.osdetails[self.pd.os]['dhcpleasedir']
+                           'debian': {"dhcpservice":"isc-dhcp-server", "dhcpconfdir":"/etc/dhcp", "dhcpleasedir":"/var/lib/dhcp", "dhcpduser":"root"},\
+                           'ubuntu': {"dhcpservice":"isc-dhcp-server", "dhcpconfdir":"/etc/dhcp", "dhcpleasedir":"/var/lib/dhcp", "dhcpduser":"root"}}
+                           # 'centos': {"dhcpservice":"dhcpd", "dhcpconfdir":"/etc/dhcp", "dhcpleasedir":"/var/lib/dhcpd", "dhcpduser":"dhcpd"}}
+                           # 'opensuse-leap': {"dhcpservice":"dhcpd", "dhcpconfdir":"/etc", "dhcpleasedir":"/var/lib/dhcp/db", "dhcpduser":"dhcpd"},
+        self.dhsrv = self.osdetails[ostype]['dhcpservice']
+        # self.dhcpuser not currently used (but centos hasn't been tested yet)
+        self.dhcpuser = self.osdetails[ostype]['dhcpduser']
+        self.dhcpconfdir = self.osdetails[ostype]['dhcpconfdir']
+        self.dhcpleasedir = self.osdetails[ostype]['dhcpleasedir']
         self.dhconf = "dhcpd.conf"
         self.dhcpfh = None
         fnsfmt = "{}/{}"
         self.dhfile = fnsfmt.format(self.dhcpconfdir, self.dhconf)
         self.subnetfn = fnsfmt.format(self.dhcpconfdir, "subnet-{}.hosts".format(self.pd.db['cfg']['subnet']))
         self.fnslist = [ self.dhfile, self.subnetfn ]
-
 
     def start(self):
         self.pd.xdosystem("systemctl start {}.service".format(self.dhsrv))
@@ -92,15 +98,6 @@ class ndmdhcp():
         self.dhcpfh.close()
         return True
 
-    def gendnsupdkey(self):
-        return True
-        if not 'dhcpkey' in self.pd.db['cfg']:
-            tsigout = subprocess.check_output("tsig-keygen -a hmac-md5 -r /dev/urandom dhcp-update", shell=True)
-            for line in tsigout.decode('utf-8').split("\n"):
-                if 'secret' in line:
-                    self.pd.db['cfg']['dhcpkey'] = line.split('"')[1]
-                    self.pd.dbmodified = True
-
     def diff(self, fundiff):
         fundiff(self.pd, self.dhfile)
         fundiff(self.pd, self.subnetfn)
@@ -117,7 +114,7 @@ class ndmdhcp():
                 
     def _writedhcpconf(self, fh):
         newftime = datetime.datetime.strftime(datetime.datetime.now(), "%c")
-        fh.write("# dhcpd.conf created {}\n".format(newftime))
+        fh.write("# dhcpd.conf created by ndm {}\n".format(newftime))
         fh.write("authoritative;\n")
         fh.write("option routers {};\n".format(self.pd.db['cfg']['gateway']))
         fh.write("option subnet-mask 255.255.255.0;\n")
@@ -131,7 +128,7 @@ class ndmdhcp():
         fh.write("key dhcp-update {{\n\
     algorithm hmac-md5;\n\
     secret {};\n\
-}}\n\n".format(self.pd.db['cfg']['dhcpkey']))
+}}\n\n".format(self.pd.db['cfg']['DNSUpdateKey']))
         self._writedhcpzone(fh, "{}.dhcp".format(self.pd.xipinvert(self.pd.db['cfg']['subnet'])))
         self._writedhcpzone(fh, self.pd.db['cfg']['domain'])
         self._writedhcpzone(fh, "dyn.{}".format(self.pd.db['cfg']['domain']))

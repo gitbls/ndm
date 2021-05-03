@@ -7,6 +7,8 @@ import os
 # Responsible for managing the dnsmasq configuration file
 # Also maintains /etc/hosts
 #
+# Version 2.2
+#
 class ndmdns():
     def __init__(self, pd):
         # Sort out filenames here
@@ -39,7 +41,7 @@ class ndmdns():
 
     def emithost(self, ipaddr, hn):
         if hn == "": return
-        emac = self.pd.db['hosts'][ipaddr]['hostname'][hn]['macaddr']
+        #emac = self.pd.db['hosts'][ipaddr]['hostname'][hn]['macaddr']
         eopts = self.pd.db['hosts'][ipaddr]['hostname'][hn]['flags']
         # hosts file
         if not ("zoneonly" in eopts) and not ("dhcponly" in eopts):
@@ -90,9 +92,6 @@ class ndmdns():
             self.pd.xqrename(fn, self.pd.xmkbakfn(fn))
             self.pd.xcopy(self.pd.xmktmpfn(self.tmp, fn), fn)
         self._doresolvconf()
-        return True
-
-    def gendnsupdkey(self):
         return True
 
     def diff(self, fundiff):
@@ -240,9 +239,6 @@ class ndmdhcp():
         return True
 
     def chroot(self):
-        return True
-
-    def gendnsupdkey(self):
         return True
 
     def _writedhcpconf(self, fh):

@@ -4,7 +4,9 @@ import os
 #
 # DHCP class for none
 #
-# Responsible for managing the dnsmasq DHCP data 
+# Dummy module to manage the 'none' DHCP server
+#
+# Version 2.2
 #
 class ndmdhcp():
     def __init__(self, pd):
@@ -44,8 +46,5 @@ class ndmdhcp():
         return True
 
     def chroot(self):
-        return True
-
-    def gendnsupdkey(self):
         return True
 

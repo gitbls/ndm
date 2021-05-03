@@ -66,31 +66,6 @@ def ipinvert(ipaddr):
     els = ipaddr.split(".")
     return '.'.join([els[2], els[1], els[0]])
     
-def getostype(pd):
-    ostype = pd.db['cfg']['os']
-    if ostype == "":
-        try:
-            with open("/etc/os-release") as f:
-                for line in f:
-                    els = line.split('=')
-                    if els[0] == "ID":
-                        ostype = els[1].rstrip()
-                        break
-        except:
-            ostype = ""
-    ostype = ostype.replace('"','').lower()
-    if ostype == "raspbian": ostype = "raspios"
-    if ostype == "":
-        perrorexit ("? No OS ID information found in /etc/os-release and --os not specified")
-    if ostype != pd.db['cfg']['os']:
-        if ostype in pd.osdetails:
-            pd.db['cfg']['os'] = ostype
-            pd.dbmodified = True
-        else:
-            perrorexit("? Unknown OS '{}'".format(ostype))
-    pd.os = pd.db['cfg']['os']
-    return True
-
 def getmyipaddr(ifname):
     import fcntl
     import struct
@@ -153,14 +128,20 @@ def loadmodule(pd, modname, dnsordhcp):
     try:
         # Load the module
         exec("from {} import ndm{}".format(modname, dnsordhcp))
-        # Instantiate the class ndm{dns|dhcp} into pd.{dns|dhcp}
+    except (ModuleNotFoundError, ImportError, Exception) as X:
+        perrorexit("? Error importing '{}' for {}\n  {}".format(modname,dnsordhcp.upper(), X))
+    # Instantiate the class ndm{dns|dhcp} into pd.{dns|dhcp}
+    try:
         exec("pd.{} = ndm{}(pd)".format(dnsordhcp, dnsordhcp))
-    except:
-        perrorexit("? Error loading file {} for {}".format(modname, dnsordhcp.upper()))
+    except Exception as X:
+        perrorexit("? Error instantiating class 'ndm{}' in file {} for {}\n {}".format(dnsordhcp, modname, dnsordhcp.upper(),X))
 
+def  cknownos(pd):
+    if not pd.db['cfg']['os'] in pd.knownos: perrorexit("? ndm doesn't support OS '{}' for this command\n 'sudo ndm config --os type' to set".format(pd.db['cfg']['os']))
+    
 class pdat:
     def __init__(self):
-        self.version = "V2.1"
+        self.version = "V2.2"
         self.dbversion = "2"
         self.dns = None
         self.dhcp = None
@@ -193,7 +174,7 @@ class pdat:
         self.defaulthosts = {"127.0.0.1":"localhost", "::1":"localhost ipv6-localhost ipv6loopback",\
                              "fe00::0":"ipv6-localnet", "ff00::0":"ipv6-mcastprefix",\
                              "ff02::1":"ipv6-allnodes", "ff02::2":"ipv6-allrouters", "ff02::3":"ipv6-allhosts"}
-        self.osdetails = { 'raspbian', 'raspios' , 'ubuntu', 'debian', 'centos' }
+        self.knownos = { 'raspbian', 'raspios' , 'ubuntu', 'debian' } # 'centos' not complete
         # "servicename":"python module name", Loaded at start of command execution
         self.knowndns = { "bind":"ndmdnsbind", "dnsmasq":"ndmdnsmasq" }
         self.knowndhcp = { "isc-dhcp-server":"ndmdhcpisc", "dnsmasq":"ndmdnsmasq", "none":"ndmdhcpnone" }
@@ -209,7 +190,7 @@ class pdat:
                         missing += ', ' + i
                     else:
                         missing = i
-        if missing != "": perrorexit("? Configuration incomplete: {}\n  Use 'ndm config' to define missing items".format(missing))
+        if missing != "": perrorexit("? Configuration incomplete: {}\n  Use 'sudo ndm config' to define missing items".format(missing))
 
     def dbaddhost(self, eipaddr, emac, edhcphostopt, ehost, eopts, enote):
         if "cname" in eopts:
@@ -225,11 +206,7 @@ class pdat:
         self.dbmodified = True
 
     def dbread(self, ckcfg=True):
-        if self.args.db == None:
-            self.configfile = self.defaultconfigfile
-        else:
-            self.configfile = self.args.db
-
+        self.configfile =  self.args.db if self.args.db != None else self.defaultconfigfile
         if not self.configfile.endswith(".json"):
             self.configfile = "{}.json".format(self.configfile)
 
@@ -247,7 +224,7 @@ class pdat:
                     except ValueError:
                         perrorexit("? ndm configuration database '{}' has invalid syntax".format(self.configfile))
             except:
-                perrorexit("? Unable to open ndm configuration database '{}'".format(self.configfile))
+                perrorexit("? Unable to open ndm configuration database '{}'\n  Use 'sudo ndm config --create' to create it".format(self.configfile))
         if ckcfg: self._ckconfig()
         #
         # Database V2 upgrade if needed
@@ -268,6 +245,35 @@ class pdat:
             self.db['cfg']['netdev'] = "eth0"
             self.dbmodified = True
             
+        #
+        # "Rename" 'dhcpkey' to DNSUpdateKey
+        #
+        if 'dhcpkey' in self.db['cfg']:
+            self.db['cfg']['DNSUpdateKey'] = self.db['cfg']['dhcpkey']
+            del(self.db['cfg']['dhcpkey'])
+            self.dbmodified = True
+        #
+        # Do best-guess OS detection. Validity checked when needed (diff, install)
+        #
+        if self.db['cfg']['os'] == "":
+            ostype = ""
+            try:
+                with open("/etc/os-release") as f:
+                    for line in f:
+                        els = line.split('=')
+                        if els[0] == "ID":
+                            ostype = els[1].rstrip()
+                            break
+            except:
+                ostype = ""
+            ostype = ostype.replace('"','').lower()
+            if ostype == "raspbian": ostype = "raspios"
+            pd.db['cfg']['os'] = ostype
+            
+        #
+        # Put something in subnetmask
+        #
+        if self.db['cfg']['subnetmask'] == "": self.db['cfg']['subnetmask'] = "/24"
         if self.db['cfg']['hostname'] == "": self.db['cfg']['hostname'] = socket.gethostname()
         if self.db['cfg']['hostfqdn'] == "":
             hostfqdn = socket.getfqdn()
@@ -280,7 +286,8 @@ class pdat:
                 if self.db['cfg']['myip'] == "": self.db['cfg']['myip'] = getmyipaddr(self.db['cfg']['netdev'])
         except:
             self.db['cfg']['myip'] = "127.0.0.1"
-        if self.db['cfg']['myip'].startswith("127.0"): perrorexit("? Cannot get our IP address; please use 'ndm config --create --myip my.ip.ad.dr'")
+        if self.db['cfg']['myip'].startswith("127.0"):
+            perrorexit("% Cannot get our IP address; please use 'sudo ndm config --create --myip my.ip.ad.dr'")
         if self.db['cfg']['subnet'] == "":
             ips = self.db['cfg']['myip'].split(".")
             self.db['cfg']['subnet'] = '.'.join([ips[0], ips[1], ips[2]])
@@ -307,6 +314,7 @@ class pdat:
         qdelfile(bakf)
         qrename(self.configfile, bakf)
         qrename(tmpf, self.configfile)
+        self.dbmodified = False
 
     def dbimport(self):
         try:
@@ -402,21 +410,27 @@ def buildoutputhost(pd, keyname, listfmt):
                 pd.dns.emitcname(keyname, hname)
 
 def cmd_build(pd):
+#    cknownos(pd)
     if pd.db['cfg']['subnet'] == "":
         perrorexit("? Subnet not set; use {} --config --subnet nn.nn.nn".format(pd.ndmcmd))
-    # build command doesn't set pd.modifed, so these don't get saved
-    # This enables build command settings to override config
-    if pd.args.dnsinclude != None: pd.db['cfg']['dnsinclude'] = pd.args.dnsinclude
-    if pd.args.dhcpinclude != None: pd.db['cfg']['dhcpinclude'] = pd.args.dhcpinclude
+    # Enables build command settings to override config
+    if pd.args.dnsinclude != None:
+        svdnsincl = pd.db['cfg']['dnsinclude'] 
+        pd.db['cfg']['dnsinclude'] = pd.args.dnsinclude
+    if pd.args.dhcpinclude != None:
+        svdhcpincl = pd.db['cfg']['dhcpinclude']
+        pd.db['cfg']['dhcpinclude'] = pd.args.dhcpinclude
     pd.dns.prebuild()
     pd.dhcp.prebuild()
-    pd.dns.gendnsupdkey()
-    pd.dhcp.gendnsupdkey()
     pd.dns.startbuild()
     pd.dhcp.startbuild()
     pd.dbdoallnodes(buildoutputhost, "")
     pd.dns.endbuild()
     pd.dhcp.endbuild()
+    # Reset dnsinclude and dhcpinclude if modified, in case the DB gets written. Ugly
+    if pd.args.dnsinclude != None: pd.db['cfg']['dnsinclude'] = svdnsincl
+    if pd.args.dhcpinclude != None: pd.db['cfg']['dhcpinclude'] = svdhcpincl
+    pd.dbwrite()         # Check and Write DB in case DNSUpdateKey was generated
     print("% Build completed in tmp directory '{}'".format(pd.tmp))
     return True
 
@@ -454,6 +468,7 @@ def cmd_config(pd):
     if pd.args.mxfqdn != None: pd.db['cfg']['mxfqdn'] = pd.args.mxfqdn.lower()
     if pd.args.myip != None: pd.db['cfg']['myip'] = pd.args.myip
     if pd.args.netdev != None: pd.db['cfg']['netdev'] = pd.args.netdev
+    if pd.args.os != None: pd.db['cfg']['os'] = pd.args.os
     if pd.args.timeserver != None: pd.db['cfg']['timeserver'] = pd.args.timeserver
 
     if pd.args.dns != None:
@@ -488,7 +503,7 @@ def cmd_config(pd):
        or (pd.args.dnsip != None) or (pd.args.dnsfqdn != None) or (pd.args.mxfqdn != None) or (pd.args.dhcplease != None)\
        or (pd.args.externaldns != None) or (pd.args.dhcpsubnet != None)\
        or (pd.args.internals != None) or (pd.args.dhcphostopt != None) or (pd.args.blockdomains != None)\
-       or (pd.args.hostname != None) or (pd.args.hostfqdn != None)\
+       or (pd.args.hostname != None) or (pd.args.hostfqdn != None) or (pd.args.os != None)\
        or (pd.args.dnslistenport != None) or (pd.args.myip != None)\
        or (pd.args.dns != None) or (pd.args.dhcp != None) or (pd.args.netdev != None)\
        or (pd.args.dnsinclude != None) or (pd.args.dhcpinclude != None)\
@@ -541,11 +556,13 @@ def cmd_delete(pd):
     return True
     
 def cmd_diff(pd):
+    cknownos(pd)
     pd.dns.diff(dodiff)
     pd.dhcp.diff(dodiff)
     
 def cmd_install(pd):
     if pd.myuid != 0: perrorexit("? You must be root to Install")
+    cknownos(pd)
     dnsrunning = pd.dns.isrunning() == 0
     dhcprunning = pd.dhcp.isrunning() == 0
     fnm = pd.dns.preinstall()
@@ -598,6 +615,15 @@ def cmd_modify(pd):
         hname = getmodifyhostname(pd, keyname, hname, "--mac")
         pd.db['hosts'][keyname]['hostname'][hname]['macaddr'] = pd.args.mac.lower()
     if pd.args.dhcphostopt != None: pd.db['hosts'][keyname]['dhcphostopt'] = pd.args.dhcphostopt
+    eopts = ""
+    if pd.args.nodhcp: eopts += "+nodhcp"
+    if pd.args.dhcponly: eopts += "+dhcponly"
+    if pd.args.hostsonly: eopts += "+hostsonly"
+    if pd.args.nodomain: eopts += "+nodomain"
+    if pd.args.zoneonly: eopts += "+zoneonly"
+    if eopts != "":
+        hname = getmodifyhostname(pd, keyname, hname, "modifying DHCP/DNS attributes")
+        pd.db['hosts'][keyname]['hostname'][hname]['flags'] = eopts
     pd.dbmodified = True
     pd.dbwrite()
     return True
@@ -676,20 +702,23 @@ pd.parser = argparse.ArgumentParser(
 
 pd.parser.set_defaults(func=cmd_help, ckcfg=False, create=False, db=None, loadsrv=False, mktmpdir=False, tmp=None, usedb=True)
 
+addmodify_parent_parser = argparse.ArgumentParser(add_help=False)
+addmodify_parent_parser.add_argument("--dhcponly", help="Only put this host in dhcpd.conf (no hosts or DNS config entries)", action='store_true')
+addmodify_parent_parser.add_argument("--hostsonly", help="Only put this host in hosts file (no dhcpd.conf or DNS zone entries)", action='store_true')
+addmodify_parent_parser.add_argument("--nodhcp", help="Don't add host to dhcpd.conf", action='store_true')
+addmodify_parent_parser.add_argument("--nodomain", help="Don't add the domain name to this entry; It's already fully qualified", action='store_true')
+addmodify_parent_parser.add_argument("--zoneonly", help="Only put this host in DNS config files (no dhcpd.conf or hosts file)", action='store_true')
+
 subparsers = pd.parser.add_subparsers(help="sub-command help")
-subparser_add = subparsers.add_parser("add", help="Add a new host to the database")
+
+subparser_add = subparsers.add_parser("add", help="Add a new host to the database", parents=[addmodify_parent_parser])
 subparser_add.add_argument("ip", help="New host IP address")
 subparser_add.add_argument("--cname", help="Put this entry in DNS zone files as a CNAME", action='store_true')
 subparser_add.add_argument("--db", help="Specify alternate config file")
 subparser_add.add_argument("--dhcphostopt", help="Name of dhcphostopt to add to this host's dhcp entry")
-subparser_add.add_argument("--dhcponly", help="Only put this host in dhcpd.conf (no hosts or DNS config entries)", action='store_true')
 subparser_add.add_argument("--hostname", help="New host name")
-subparser_add.add_argument("--hostsonly", help="Only put this host in hosts file (no dhcpd.conf or DNS zone entries)", action='store_true')
 subparser_add.add_argument("--mac", help="MAC address for new hostname")
-subparser_add.add_argument("--nodhcp", help="Don't add host to dhcpd.conf", action='store_true')
-subparser_add.add_argument("--nodomain", help="Don't add the domain name to this entry; It's already fully qualified", action='store_true')
 subparser_add.add_argument("--note", help="Note text for new hostname")
-subparser_add.add_argument("--zoneonly", help="Only put this host in DNS config files (no dhcpd.conf or hosts file)", action='store_true')
 subparser_add.set_defaults(func=cmd_add)
 
 subparser_build = subparsers.add_parser("build", help="Build new host databases in tmp staging area")
@@ -754,7 +783,7 @@ subparser_list.add_argument("--db", help="Specify alternate config file name")
 subparser_list.add_argument("--dump", help="Print list in import format", action='store_true')
 subparser_list.set_defaults(func=cmd_list)
 
-subparser_modify = subparsers.add_parser("modify", help="Modify host attributes in the database")
+subparser_modify = subparsers.add_parser("modify", help="Modify host attributes in the database", parents=[addmodify_parent_parser])
 subparser_modify.add_argument("ip", help="IP address to modify")
 subparser_modify.add_argument("--db", help="Specify alternate config file name")
 subparser_modify.add_argument("--dhcphostopt", help="Name of dhcphostopt to add to the host's DHCP entry")
@@ -784,14 +813,9 @@ subparser_help.set_defaults(func=cmd_help, usedb=False)
 pd.args = pd.parser.parse_args()
 if pd.args.usedb:
     pd.dbread(ckcfg=pd.args.ckcfg)
-    getostype(pd)
     if pd.args.mktmpdir: mktmpdir(pd)
     if pd.args.loadsrv:
-        if pd.db['cfg']['dns'] != "":
-            loadmodule(pd, pd.knowndns[pd.db['cfg']['dns']], "dns")
-            #pd.dns.gendnsupdkey()
-        if pd.db['cfg']['dhcp'] != "":
-            loadmodule(pd, pd.knowndhcp[pd.db['cfg']['dhcp']], "dhcp")
-            #pd.dhcp.gendnsupdkey()
+        if pd.db['cfg']['dns'] != "": loadmodule(pd, pd.knowndns[pd.db['cfg']['dns']], "dns")
+        if pd.db['cfg']['dhcp'] != "": loadmodule(pd, pd.knowndhcp[pd.db['cfg']['dhcp']], "dhcp")
 pd.args.func(pd)
 exit

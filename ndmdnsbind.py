@@ -1,8 +1,11 @@
 import datetime
 import os
+
 #
 # DNS class for Bind9 DNS server
 # Responsible for managing the Bind9 database and /etc/hosts
+#
+# Version 2.2
 #
 class ndmdns():
     def __init__(self, pd):
@@ -11,20 +14,25 @@ class ndmdns():
         self.tmp = pd.tmp
         self.etc = "/etc"
         self.resolvconf = "name_servers=127.0.0.1\ndomain={}\nsearch_domains={}\nsearch_domains_append=dyn.{}\n"
+        ostype = self.pd.os
+        if not ostype in self.pd.knownos: ostype = 'raspios' 
         self.osdetails = { 'raspios':       { "bindservice":"bind9", "bindconfdir":"/etc/bind", "bindzonedir":"/etc/bind",\
                                               "bindconffn":"named.conf.options", "bindrundir":"/var/cache/bind", "binduser":"bind" },\
-                           'debian':        { "bindservice":"bind9", "bindconfdir":"/etc/bind", "bindzonedir":"/etc/bind",\
+                           'ubuntu':        { "bindservice":"named", "bindconfdir":"/etc/bind", "bindzonedir":"/etc/bind",\
                                               "bindconffn":"named.conf.options", "bindrundir":"/var/cache/bind", "binduser":"bind" },\
-                           'centos':        { "bindservice":"named", "bindconfdir":"/etc", "bindzonedir":"/var/named/master",\
-                                              "bindconffn":"named.conf", "bindrundir":"/var/named", "binduser":"named" }}
+                           'debian':        { "bindservice":"bind9", "bindconfdir":"/etc/bind", "bindzonedir":"/etc/bind",\
+                                              "bindconffn":"named.conf.options", "bindrundir":"/var/cache/bind", "binduser":"bind" }}
+#                           'centos':        { "bindservice":"named", "bindconfdir":"/etc", "bindzonedir":"/var/named/master",\
+#                                              "bindconffn":"named.conf", "bindrundir":"/var/named", "binduser":"named" }}
 #                           'opensuse-leap': { "bindservice":"named", "bindconfdir":"/etc", "bindzonedir":"/var/lib/named/master",\
-#                                              "bindconffn":"named.conf", "bindrundir":"/var/lib/named", "binduser":"named" },\
-        self.dnsrv = self.osdetails[self.pd.os]['bindservice']
-        self.zdir = self.osdetails[self.pd.os]['bindzonedir']
-        self.nofile = self.osdetails[self.pd.os]['bindconffn']
-        self.bindconfdir = self.osdetails[self.pd.os]['bindconfdir']
-        self.bindrundir = self.osdetails[self.pd.os]['bindrundir']
-        self.binduser = self.osdetails[self.pd.os]['binduser']
+#                                              "bindconffn":"named.conf", "bindrundir":"/var/lib/named", "binduser":"named" },
+        self.dnsrv = self.osdetails[ostype]['bindservice']
+        self.zdir = self.osdetails[ostype]['bindzonedir']
+        self.nofile = self.osdetails[ostype]['bindconffn']
+        self.bindconfdir = self.osdetails[ostype]['bindconfdir']
+        self.bindrundir = self.osdetails[ostype]['bindrundir']
+        # self.binduser not currently needed, but keep in case a future OS does
+        self.binduser = self.osdetails[ostype]['binduser']
         fnsfmt = "{}/{}"
         hfn = "hosts"
         zfn = "db.{}".format(self.pd.db['cfg']['domain'])
@@ -33,23 +41,15 @@ class ndmdns():
         blfn = "ndm-bind-blocked.conf"
         dyfn = "db.dyn.{}".format(self.pd.db['cfg']['domain'])
         rdyfn = "db.{}.dhcp".format(self.pd.db['cfg']['subnet'])
-
-        xhfile = fnsfmt.format(self.etc, hfn)
-        xzfile = fnsfmt.format(self.zdir, zfn)
-        xrzfile = fnsfmt.format(self.zdir, rzfn)
-        xbzfile = fnsfmt.format(self.zdir, bzfn)
-        xdynfile = fnsfmt.format(self.zdir, dyfn)
-        xrdynfile = fnsfmt.format(self.zdir, rdyfn)
         self.xnofile = fnsfmt.format(self.bindconfdir, self.nofile)
-        xblfile = fnsfmt.format(self.bindconfdir, blfn)
                                   #full-file-spec, file-handle, dont-delete-unless
-        self.dnsfns = { 'hosts':        [xhfile,    None, False],\
-                        'domzone':      [xzfile,    None, False],\
-                        'revdomzone':   [xrzfile,   None, False],\
-                        'blockzone':    [xbzfile,   None, False],\
-                        'blockinclude': [xblfile,   None, False],\
-                        'dynzone':      [xdynfile,  None, True],\
-                        'revdynzone':   [xrdynfile, None, True]}
+        self.dnsfns = { 'hosts':        [fnsfmt.format(self.etc, hfn),          None, False],\
+                        'domzone':      [fnsfmt.format(self.zdir, zfn),         None, False],\
+                        'revdomzone':   [ fnsfmt.format(self.zdir, rzfn),       None, False],\
+                        'blockzone':    [fnsfmt.format(self.zdir, bzfn),        None, False],\
+                        'blockinclude': [fnsfmt.format(self.bindconfdir, blfn), None, False],\
+                        'dynzone':      [fnsfmt.format(self.zdir, dyfn),  None, True],\
+                        'revdynzone':   [fnsfmt.format(self.zdir, rdyfn), None, True]}
 
         # indexes into dnsfns
         self.ffs = 0       #Full file spec
@@ -100,7 +100,9 @@ class ndmdns():
 
     def prebuild(self):
         if not os.path.isfile("/sbin/tsig-keygen") and not os.path.isfile("/usr/sbin/tsig-keygen"):
-            self.pd.xperrorexit("? Cannot find /sbin/tsig-keygen")
+            self.pd.xperrorexit("? Cannot find /sbin/tsig-keygen\n  Do 'sudo apt install bind9' to install it")
+        if self.gendnsupdkey(): self.pd.dbmodified = True
+        return True
 
     def startbuild(self):
         newdatesn = self._gendatesn()
@@ -159,14 +161,14 @@ class ndmdns():
         return True
 
     def gendnsupdkey(self):
-        if not 'dhcpkey' in self.pd.db['cfg']:
-            r = self.pd.xdosystem("tsig-keygen -a hmac-md5 -r /dev/urandom dhcp-update")
+        if not 'DNSUpdateKey' in self.pd.db['cfg']:
+            tsiggen = "/sbin/tsig-keygen" if os.path.isfile("/sbin/tsig-keygen") else "/usr/sbin/tsig-keygen"
+            r = self.pd.xdosystem("{} -a hmac-md5 dhcp-update".format(tsiggen))
             for line in r.stdout.decode('utf-8').split("\n"):
                 if 'secret' in line:
-                    self.pd.db['cfg']['dhcpkey'] = line.split('"')[1]
-                    self.pd.dbmodified = True
-                    break
-        return True
+                    self.pd.db['cfg']['DNSUpdateKey'] = line.split('"')[1]
+                    return True
+        return False
 
     def diff(self, fundiff):
         for i in self.dnsfns:
@@ -201,7 +203,7 @@ class ndmdns():
         sorigin = "$ORIGIN {}.\n".format(origin) if origin != "" else ""
         sdomain = "{}.".format(origin) if origin != "" else "@"
         szname = origin if origin != "" else self.pd.db['cfg']['domain']
-        headstrings = ["; {} {} created {}\n".format(newdatesn, szname, newftime),\
+        headstrings = ["; {} {} created by ndm {}\n".format(newdatesn, szname, newftime),\
                    "$TTL	86400    ; 24 hours. could have been written as 24h or 1d\n",\
                    sorigin,\
                    "{}  IN    SOA {}. root.{}. (\n".format(sdomain, self.pd.db['cfg']['hostfqdn'], self.pd.db['cfg']['domain']),\
@@ -245,6 +247,7 @@ class ndmdns():
         with open(self.pd.xmktmpfn(self.tmp, self.nofile), 'w') as fl:
             sinternals = "" if self.pd.db['cfg']['internals'] == "" else "{};".format(self.pd.db['cfg']['internals'])
             fl.write('\n\
+// named.conf.options created by ndm\n\
 // Consider adding the 1918 zones here, if they are not used in your\n\
 // organization\n\
 //include "/etc/bind/zones.rfc1918";\n\
@@ -277,7 +280,7 @@ logging {{\n\
 controls {{\n\
 	 inet 127.0.0.1 allow {{ localhost; }} keys {{ rndc-key; }};\n\
 }};\n\n\
-include "{}/rndc.key";\n'.format(self.pd.db['cfg']['dhcpkey'], self.bindconfdir))
+include "{}/rndc.key";\n'.format(self.pd.db['cfg']['DNSUpdateKey'], self.bindconfdir))
             # Domain and reverse domain statements
             self._writezonedef(fl, "{}.in-addr.arpa".format(self.pd.xipinvert(self.pd.db['cfg']['subnet'])), "{}/db.{}".format(self.zdir, self.pd.db['cfg']['subnet']))
             self._writezonedef(fl, "{}".format(self.pd.db['cfg']['domain']), "{}/db.{}".format(self.zdir, self.pd.db['cfg']['domain']))
@@ -312,7 +315,7 @@ include "{}/rndc.key";\n'.format(self.pd.db['cfg']['dhcpkey'], self.bindconfdir)
         self._writezheader(self.dnsfns['revdomzone'][self.fh], newdatesn, newftime, "{}.in-addr.arpa".format(self.pd.xipinvert(self.pd.db['cfg']['subnet'])))
         # hosts file
         flh = self.dnsfns['hosts'][self.fh]
-        flh.write("#/etc/hosts created {}\n#\n".format(newftime))
+        flh.write("#/etc/hosts created by ndm {}\n#\n".format(newftime))
         flh.write("# hosts         This file describes a number of hostname-to-address\n")
         flh.write("#               mappings for the TCP/IP subsystem.  It is mostly\n")
         flh.write("#               used at boot time, when no name servers are running.\n")
@@ -326,6 +329,7 @@ include "{}/rndc.key";\n'.format(self.pd.db['cfg']['dhcpkey'], self.bindconfdir)
         if not os.path.isfile("/etc/resolvconf.conf.ndm"):
             print("% Saving /etc/resolvconf.conf as /etc/resolvconf.conf.ndm")
             self.pd.xcopy("/etc/resolvconf.conf", "/etc/resolvconf.conf.ndm")
+            if not os.path.isfile("/etc/resolvconf.conf-orig.ndm"): self.pd.xcopy("/etc/resolvconf.conf", "/etc/resolvconf.conf-orig.ndm")
             print("% Writing new /etc/resolvconf.conf")
             with open("/etc/resolvconf.conf", 'w') as rcf:
                 rcf.write(self.resolvconf.format(self.pd.db['cfg']['domain'], self.pd.db['cfg']['domain'], self.pd.db['cfg']['domain']))
