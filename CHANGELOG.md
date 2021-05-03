@@ -1,5 +1,14 @@
 # Changelog
 
+	
+## V2.2
+
+* ndm now supports Raspbian/RasPiOS, Debian, and Ubuntu
+* Rename database item dhcpkey to DNSUpgradeKey, and change to just-in-time creation. If you want to change it, simply edit /etc/dbndm.json and delete the line with DNSUpgradeKey in it.
+* Add version numbers to all files
+* Add setting of some host flags in 'ndm modify'
+* Improve OS type handling. All commands except diff and install can be used on an "unknown" OS, so you can build the config files and move them manually on an NYI-in-ndm OS
+
 ## V2.0
 
 * This release is a Major overhaul!
