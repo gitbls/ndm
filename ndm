@@ -141,7 +141,7 @@ def  cknownos(pd):
     
 class pdat:
     def __init__(self):
-        self.version = "V2.2"
+        self.version = "V2.3"
         self.dbversion = "2"
         self.dns = None
         self.dhcp = None
@@ -167,7 +167,7 @@ class pdat:
         self.xperrorexit = perrorexit
         
         self.listformat = "{:<16} {:<17} {:<16} {:<16} {:<16} {}"
-        self.dbinitialize = '{"cfg":{"dbversion":"","dns":"", "dhcp":"", "os":"", "domain":"me", "subnet":"", "internals":"",\
+        self.dbinitialize = '{"cfg":{"bindoptions":"", "dbversion":"","dns":"", "dhcp":"", "os":"", "domain":"me", "subnet":"", "internals":"",\
         "subnetmask":"", "gateway":"", "timeserver":"", "dnsip":"", "dnsfqdn":"", "mxfqdn":"", "dhcplease":"86400",\
         "dhcpsubnet":"","dnslistenport":"53", "myip":"", "netdev":"eth0", "externaldns":"", "hostfqdn":"",\
         "blockdomains":"", "dnsinclude":"", "dhcpinclude":"", "dhcpglobalopt":"", "dhcphostopt":{}},"hosts":{},"cname":{}}'
@@ -181,7 +181,7 @@ class pdat:
 
     def _ckconfig(self):
         # OK if these VV options are not set. All others must be set
-        ignore = ['dhcphostopt', 'dhcpglobalopt', 'hostfqdn', 'dnsip', 'blockdomains', 'subnetmask', 'dnsinclude', 'dhcpinclude', 'internals']
+        ignore = ['dhcphostopt', 'dhcpglobalopt', 'hostfqdn', 'dnsip', 'blockdomains', 'bindoptions', 'subnetmask', 'dnsinclude', 'dhcpinclude', 'internals']
         missing = ""
         for i in self.db['cfg']:
             if not i in ignore:
@@ -251,6 +251,12 @@ class pdat:
         if 'dhcpkey' in self.db['cfg']:
             self.db['cfg']['DNSUpdateKey'] = self.db['cfg']['dhcpkey']
             del(self.db['cfg']['dhcpkey'])
+            self.dbmodified = True
+        #
+        # Make sure bindoptions key is present
+        #
+        if not 'bindoptions' in self.db['cfg']:
+            self.db['cfg']['bindoptions'] = ""
             self.dbmodified = True
         #
         # Do best-guess OS detection. Validity checked when needed (diff, install)
@@ -452,6 +458,9 @@ def cmd_config(pd):
                 pd.db['cfg']['subnetmask'] = sn[1] # Needs more work
         pd.db['cfg']['subnet'] = sn[0]
 
+    if pd.args.bindoptions != None:
+        if pd.args.bindoptions != "" and not os.path.isfile(pd.args.bindoptions): perrorexit("? --bindoptions file '{}' not found".format(pd.args.bindoptions))
+        pd.db['cfg']['bindoptions'] = pd.args.bindoptions
     if pd.args.dhcpglobalopt != None: pd.db['cfg']['dhcpglobalopt'] = pd.args.dhcpglobalopt
     if pd.args.dhcpinclude != None: pd.db['cfg']['dhcpinclude'] = pd.args.dhcpinclude
     if pd.args.dhcplease != None: pd.db['cfg']['dhcplease'] = pd.args.dhcplease
@@ -501,7 +510,7 @@ def cmd_config(pd):
     cfmodified = False
     if (pd.args.domain != None) or (pd.args.subnet != None) or (pd.args.gateway != None) or (pd.args.timeserver != None)\
        or (pd.args.dnsip != None) or (pd.args.dnsfqdn != None) or (pd.args.mxfqdn != None) or (pd.args.dhcplease != None)\
-       or (pd.args.externaldns != None) or (pd.args.dhcpsubnet != None)\
+       or (pd.args.bindoptions != None) or (pd.args.externaldns != None) or (pd.args.dhcpsubnet != None)\
        or (pd.args.internals != None) or (pd.args.dhcphostopt != None) or (pd.args.blockdomains != None)\
        or (pd.args.hostname != None) or (pd.args.hostfqdn != None) or (pd.args.os != None)\
        or (pd.args.dnslistenport != None) or (pd.args.myip != None)\
@@ -729,6 +738,7 @@ subparser_build.add_argument("--tmp", help="Directory for the the generated file
 subparser_build.set_defaults(func=cmd_build, ckcfg=True, loadsrv=True, mktmpdir=True)
 
 subparser_config = subparsers.add_parser("config", help="Manage configuration database")
+subparser_config.add_argument("--bindoptions", help="Add additional statements to bind 'options' section")
 subparser_config.add_argument("--blockdomains", help="Comma-separated list of domains to block")
 subparser_config.add_argument("--create", help="Create the Network DB file", action='store_true')
 subparser_config.add_argument("--db", help="Specify alternate config file")

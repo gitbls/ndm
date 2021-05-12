@@ -263,9 +263,17 @@ options {{\n\
     allow-query {{ internals; }};\n\
     allow-query-cache {{ internals; }};\n\
     allow-recursion {{ internals; }};\n\
-    forwarders {{ {} }};\n\
-}};\n\n'.format(self.pd.db['cfg']['subnet'], sinternals, self.bindrundir, self.pd.db['cfg']['dnslistenport'], self.pd.db['cfg']['myip'], odns))
-            fl.write('\n\
+    forwarders {{ {} }};\n'.format(self.pd.db['cfg']['subnet'], sinternals, self.bindrundir, self.pd.db['cfg']['dnslistenport'], self.pd.db['cfg']['myip'], odns))
+            if self.pd.db['cfg']['bindoptions'] != "":
+                # Handle bindoptions if provided
+                fopt = open(self.pd.db['cfg']['bindoptions'], 'r')
+                for line in fopt:
+                    line = line.rstrip()
+                    if line != "":
+                        if not line.startswith("    "): line = "    {}".format(line)
+                        fl.write("{}\n".format(line))
+                fopt.close()
+            fl.write('}};\n\n\n\
 key dhcp-update {{\n\
     algorithm hmac-md5;\n\
     secret "{}";\n\
