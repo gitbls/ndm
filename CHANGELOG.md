@@ -1,6 +1,10 @@
 # Changelog
 
 	
+## V2.3
+
+* Add --bindoptions switch, enabling the addition of bind options settings not supported directly by ndm
+
 ## V2.2
 
 * ndm now supports Raspbian/RasPiOS, Debian, and Ubuntu
