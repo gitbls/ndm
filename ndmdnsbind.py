@@ -265,7 +265,8 @@ options {{\n\
     allow-recursion {{ internals; }};\n\
     forwarders {{ {} }};\n'.format(self.pd.db['cfg']['subnet'], sinternals, self.bindrundir, self.pd.db['cfg']['dnslistenport'], self.pd.db['cfg']['myip'], odns))
             if self.pd.db['cfg']['bindoptions'] != "":
-                # Handle bindoptions if provided
+                # Handle bindoptions 
+                if not os.path.isfile(self.pd.db['cfg']['bindoptions']): self.pd.xperrorexit("? --bindoptions file '{}' not found".format(self.pd.db['cfg']['bindoptions']))
                 fopt = open(self.pd.db['cfg']['bindoptions'], 'r')
                 for line in fopt:
                     line = line.rstrip()

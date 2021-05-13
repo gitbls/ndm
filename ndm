@@ -141,7 +141,7 @@ def  cknownos(pd):
     
 class pdat:
     def __init__(self):
-        self.version = "V2.3"
+        self.version = "V2.4"
         self.dbversion = "2"
         self.dns = None
         self.dhcp = None
