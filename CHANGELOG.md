@@ -1,6 +1,10 @@
 # Changelog
 
 	
+## V2.4
+
+* Add missing check that the --bindoptions file exists when doing an ndm build (ie not just when set with ndm config)
+
 ## V2.3
 
 * Add --bindoptions switch, enabling the addition of bind options settings not supported directly by ndm
