@@ -14,6 +14,8 @@ While most, if not all routers provide DNS and DHCP services, ndm has some signi
 * The ndm database and configuration is maintained in a **single, portable file**, so it's easy to backup and restore.
 * The network configuration and IP address assignments are **easy to manage and view**.
 
+Have questions about ndm? Please don't hesitate to ask in the Issues section of this github. If you don't have a github account (so can't post an issue/question here), please feel free to email me at: [gitbls@outlook.com](mailto:gitbls@outlook.com).
+
 If you find ndm useful, please consider starring it to help me understand how many people are using it. Thanks!
 
 **ndm capabilities include:**
