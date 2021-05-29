@@ -141,7 +141,7 @@ def  cknownos(pd):
     
 class pdat:
     def __init__(self):
-        self.version = "V2.4"
+        self.version = "V2.5"
         self.dbversion = "2"
         self.dns = None
         self.dhcp = None
@@ -440,14 +440,20 @@ def cmd_build(pd):
     print("% Build completed in tmp directory '{}'".format(pd.tmp))
     return True
 
+def doconfigitem(pd, dest, argval, lowerit=False):
+    # If arg was specified on command line, set it into the configuration and set dbmodified
+    # if lowerit=True set the value lower-cased
+    if argval != None:
+        pd.db['cfg'][dest] = argval if lower == False else argval.lower()
+        pd.dbmodified = True
+
 def cmd_config(pd):
     if pd.args.domain != None:
         pdom = pd.db['cfg']['domain']
-        pd.db['cfg']['domain'] = pd.args.domain.lower()
+        doconfigitem(pd, 'domain', pd.args.domain, lowerit=True)
         for cf in ['hostfqdn', 'dnsfqdn', 'mxfqdn']:
             fqdn = pd.db['cfg'][cf]
             if fqdn.endswith(".{}".format(pdom)):
-                #if ".{}".format(pdom) in fqdn:
                 pd.db['cfg'][cf] = "{}.{}".format(fqdn.split(".{}".format(pdom))[0], pd.db['cfg']['domain'])
     if pd.args.subnet != None:
         sn = pd.args.subnet.split('/')
@@ -459,35 +465,38 @@ def cmd_config(pd):
         pd.db['cfg']['subnet'] = sn[0]
 
     if pd.args.bindoptions != None:
-        if pd.args.bindoptions != "" and not os.path.isfile(pd.args.bindoptions): perrorexit("? --bindoptions file '{}' not found".format(pd.args.bindoptions))
-        pd.db['cfg']['bindoptions'] = pd.args.bindoptions
-    if pd.args.dhcpglobalopt != None: pd.db['cfg']['dhcpglobalopt'] = pd.args.dhcpglobalopt
-    if pd.args.dhcpinclude != None: pd.db['cfg']['dhcpinclude'] = pd.args.dhcpinclude
-    if pd.args.dhcplease != None: pd.db['cfg']['dhcplease'] = pd.args.dhcplease
-    if pd.args.dhcpsubnet != None: pd.db['cfg']['dhcpsubnet'] = pd.args.dhcpsubnet
-    if pd.args.dnsfqdn != None: pd.db['cfg']['dnsfqdn'] = pd.args.dnsfqdn.lower()
-    if pd.args.dnsinclude != None: pd.db['cfg']['dnsinclude'] = pd.args.dnsinclude
-    if pd.args.dnsip != None: pd.db['cfg']['dnsip'] = pd.args.dnsip
-    if pd.args.dnslistenport != None: pd.db['cfg']['dnslistenport'] = pd.args.dnslistenport
-    if pd.args.externaldns != None: pd.db['cfg']['externaldns'] = pd.args.externaldns
-    if pd.args.gateway != None: pd.db['cfg']['gateway'] = pd.args.gateway
-    if pd.args.hostfqdn != None: pd.db['cfg']['hostfqdn'] = pd.args.hostfqdn.lower()
-    if pd.args.hostname != None: pd.db['cfg']['hostname'] = pd.args.hostname.lower()
-    if pd.args.internals != None: pd.db['cfg']['internals'] = pd.args.internals
-    if pd.args.mxfqdn != None: pd.db['cfg']['mxfqdn'] = pd.args.mxfqdn.lower()
-    if pd.args.myip != None: pd.db['cfg']['myip'] = pd.args.myip
-    if pd.args.netdev != None: pd.db['cfg']['netdev'] = pd.args.netdev
-    if pd.args.os != None: pd.db['cfg']['os'] = pd.args.os
-    if pd.args.timeserver != None: pd.db['cfg']['timeserver'] = pd.args.timeserver
+        if pd.args.bindoptions != "" and not os.path.isfile(pd.args.bindoptions):
+            perrorexit("? --bindoptions file '{}' not found".format(pd.args.bindoptions))
+        doconfigitem(pd, 'bindoptions', pd.args.bindoptions)
 
+    doconfigitem(pd, 'blockdomains', pd.args.blockdomains, lowerit=True)
+    doconfigitem(pd, 'dhcpglobalopt', pd.args.dhcpglobalopt)
+    doconfigitem(pd, 'dhcpinclude', pd.args.dhcpinclude)
+    doconfigitem(pd, 'dhcplease', pd.args.dhcplease)
+    doconfigitem(pd, 'dhcpsubnet', pd.args.dhcpsubnet)
+    doconfigitem(pd, 'dnsfqdn', pd.args.dnsfqdn, lowerit=True)
+    doconfigitem(pd, 'dnsinclude', pd.args.dnsinclude)
+    doconfigitem(pd, 'dnsip', pd.args.dnsip)
+    doconfigitem(pd, 'dnslistenport', pd.args.dnslistenport)
+    doconfigitem(pd, 'externaldns', pd.args.externaldns)
+    doconfigitem(pd, 'gateway', pd.args.gateway)
+    doconfigitem(pd, 'hostfqdn', pd.args.hostfqdn, lowerit=True)
+    doconfigitem(pd, 'hostname', pd.args.hostname, lowerit=True)
+    doconfigitem(pd, 'internals', pd.args.internals)
+    doconfigitem(pd, 'mxfqdn', pd.args.mxfqdn, lowerit=True)
+    doconfigitem(pd, 'myip', pd.args.myip)
+    doconfigitem(pd, 'netdev', pd.args.netdev)
+    doconfigitem(pd, 'os', pd.args.os)
+    doconfigitem(pd, 'timeserver', pd.args.timeserver)
+    
     if pd.args.dns != None:
         if not pd.args.dns in pd.knowndns:
             perrorexit("? Unknown DNS server '{}'".format(pd.args.dns))
-        pd.db['cfg']['dns'] = pd.args.dns
+        doconfigitem(pd, 'dns', pd.args.dns, lowerit=True)
     if pd.args.dhcp != None:
         if not pd.args.dhcp in pd.knowndhcp:
             perrorexit("? Unknown DHCP server '{}'".format(pd.args.dhcp))
-        pd.db['cfg']['dhcp'] = pd.args.dhcp
+        doconfigitem(pd, 'dhcp', pd.args.dhcp, lowerit=True)
     if pd.args.dns != None or pd.args.dhcp != None:
         if pd.db['cfg']['dns'] == "dnsmasq" or pd.db['cfg']['dhcp'] == "dnsmasq":
             pd.db['cfg']['dns'] = "dnsmasq"
@@ -506,25 +515,12 @@ def cmd_config(pd):
             del(pd.db['cfg']['dhcphostopt'][els[0]])
         else:
             pd.db['cfg']['dhcphostopt'][els[0]] = els[1]
-    if pd.args.blockdomains != None: pd.db['cfg']['blockdomains'] = listnormal(pd.args.blockdomains.lower(), " ")
-    cfmodified = False
-    if (pd.args.domain != None) or (pd.args.subnet != None) or (pd.args.gateway != None) or (pd.args.timeserver != None)\
-       or (pd.args.dnsip != None) or (pd.args.dnsfqdn != None) or (pd.args.mxfqdn != None) or (pd.args.dhcplease != None)\
-       or (pd.args.bindoptions != None) or (pd.args.externaldns != None) or (pd.args.dhcpsubnet != None)\
-       or (pd.args.internals != None) or (pd.args.dhcphostopt != None) or (pd.args.blockdomains != None)\
-       or (pd.args.hostname != None) or (pd.args.hostfqdn != None) or (pd.args.os != None)\
-       or (pd.args.dnslistenport != None) or (pd.args.myip != None)\
-       or (pd.args.dns != None) or (pd.args.dhcp != None) or (pd.args.netdev != None)\
-       or (pd.args.dnsinclude != None) or (pd.args.dhcpinclude != None)\
-       or (pd.args.dhcpglobalopt != None) or (pd.args.hostfqdn != None):
-        pd.dbmodified = True
-        cfmodified = True
 
     # Normalize externaldns and dhcpsubnet strings
     if pd.db['cfg']['externaldns'] != "": pd.db['cfg']['externaldns'] = listnormal(pd.db['cfg']['externaldns'], " ")
     if pd.db['cfg']['dhcpsubnet'] != "":  pd.db['cfg']['dhcpsubnet'] = listnormal(pd.db['cfg']['dhcpsubnet'],   " ")
 
-    if not cfmodified and (pd.args.importnet == None): pd.args.list = True
+    if not pd.dbmodified and (pd.args.importnet == None): pd.args.list = True
     if pd.args.importnet != None:
         pd.dbimport()
     elif pd.args.list:
