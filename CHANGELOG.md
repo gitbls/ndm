@@ -1,6 +1,10 @@
 # Changelog
 
 	
+## V2.5
+
+* Improve option handling code quality in config command
+
 ## V2.4
 
 * Add missing check that the --bindoptions file exists when doing an ndm build (ie not just when set with ndm config)
