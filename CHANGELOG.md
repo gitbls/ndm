@@ -1,6 +1,10 @@
 # Changelog
 
 	
+## V2.6
+
+* Fix doconfigitem where variable name change was incompletely implemented
+
 ## V2.5
 
 * Improve option handling code quality in config command
