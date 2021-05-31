@@ -141,7 +141,7 @@ def  cknownos(pd):
     
 class pdat:
     def __init__(self):
-        self.version = "V2.5"
+        self.version = "V2.6"
         self.dbversion = "2"
         self.dns = None
         self.dhcp = None
@@ -444,7 +444,7 @@ def doconfigitem(pd, dest, argval, lowerit=False):
     # If arg was specified on command line, set it into the configuration and set dbmodified
     # if lowerit=True set the value lower-cased
     if argval != None:
-        pd.db['cfg'][dest] = argval if lower == False else argval.lower()
+        pd.db['cfg'][dest] = argval if lowerit == False else argval.lower()
         pd.dbmodified = True
 
 def cmd_config(pd):
