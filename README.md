@@ -356,7 +356,7 @@ ndm does NO syntax checking on these statements; They must be syntactically corr
 
 ## Importing a network database
 
-Use the command `sudo ndm config --import` to import a properly formatted database. The importer does not do much syntax checking, so be sure to check the results very carefully. The import database format is
+Use the command `sudo ndm config --importnet` to import a properly formatted database. The importer does not do much syntax checking, so be sure to check the results very carefully. The import database format is
 
 IPaddr,MACaddr,hostname,flags,Note,dhcphostopt,
 
