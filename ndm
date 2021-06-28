@@ -141,7 +141,7 @@ def  cknownos(pd):
     
 class pdat:
     def __init__(self):
-        self.version = "V2.6"
+        self.version = "V2.7"
         self.dbversion = "2"
         self.dns = None
         self.dhcp = None
@@ -155,6 +155,7 @@ class pdat:
         self.defaultconfigfile = "/etc/dbndm.json"
         self.db = None
         self.dbmodified = False
+        self.cmdmodified = False #db modified b/c db config cmd switch
         self.dnsmasqfh = None
         # These functions available to ndmdns and ndmdhcp classes 
         self.xqdelfile = qdelfile
@@ -253,11 +254,12 @@ class pdat:
             del(self.db['cfg']['dhcpkey'])
             self.dbmodified = True
         #
-        # Make sure bindoptions key is present
+        # Make sure keys added later are present
         #
-        if not 'bindoptions' in self.db['cfg']:
-            self.db['cfg']['bindoptions'] = ""
-            self.dbmodified = True
+        for ckey in ['bindoptions', 'dhcpglobalinclude', 'dhcppoolinclude']:
+            if not ckey in self.db['cfg']:
+                self.db['cfg'][ckey] = ""
+                self.dbmodified = True
         #
         # Do best-guess OS detection. Validity checked when needed (diff, install)
         #
@@ -446,6 +448,7 @@ def doconfigitem(pd, dest, argval, lowerit=False):
     if argval != None:
         pd.db['cfg'][dest] = argval if lowerit == False else argval.lower()
         pd.dbmodified = True
+        pd.cmdmodified = True
 
 def cmd_config(pd):
     if pd.args.domain != None:
@@ -471,6 +474,8 @@ def cmd_config(pd):
 
     doconfigitem(pd, 'blockdomains', pd.args.blockdomains, lowerit=True)
     doconfigitem(pd, 'dhcpglobalopt', pd.args.dhcpglobalopt)
+    doconfigitem(pd, 'dhcpglobalinclude', pd.args.dhcpglobalinclude)
+    doconfigitem(pd, 'dhcppoolinclude', pd.args.dhcppoolinclude)
     doconfigitem(pd, 'dhcpinclude', pd.args.dhcpinclude)
     doconfigitem(pd, 'dhcplease', pd.args.dhcplease)
     doconfigitem(pd, 'dhcpsubnet', pd.args.dhcpsubnet)
@@ -520,7 +525,7 @@ def cmd_config(pd):
     if pd.db['cfg']['externaldns'] != "": pd.db['cfg']['externaldns'] = listnormal(pd.db['cfg']['externaldns'], " ")
     if pd.db['cfg']['dhcpsubnet'] != "":  pd.db['cfg']['dhcpsubnet'] = listnormal(pd.db['cfg']['dhcpsubnet'],   " ")
 
-    if not pd.dbmodified and (pd.args.importnet == None): pd.args.list = True
+    if not pd.cmdmodified and (pd.args.importnet == None): pd.args.list = True
     if pd.args.importnet != None:
         pd.dbimport()
     elif pd.args.list:
@@ -676,14 +681,15 @@ def cmd_help(pd):
     xnm = os.path.basename(xdm)
     print(f"\n{xnm} builds the DNS and DHCP configuration files from a database\n\
 that it maintains in a JSON-formatted configuration file.\n\
-\n{xnm} can build configuration files for bind (DNS), isc-dhcp-server (DHCP),\n\
-dnsmasq (both DNS and DHCP), and none (no DHCP, DNS only)\n\
+\n{xnm} can build configuration files for these services:\n\
+DHCP: dnsmasq isc-dhcp-server none\n\
+DNS:  dnsmasq bind\n\
 \n\
-Use '{xdm} config --dns whichdns --dhcp whichdhcp' to configure this.\n\
+Use '{xdm} config --dns whichdns --dhcp whichdhcp' to configure DNS and DHCP services\n\
 \n\
-Use the '{xdm} build' command to generate the service configuration files.\n\
+Use the '{xdm} build' command to generate the service configuration files\n\
 Use the '{xdm} install' command to install the service configuration files\n\
-into the system and restart the services.\n\n")
+into the system and restart the services\n")
     pd.parser.print_help(None)
     print(f"\nUse '{xdm} command --help' for help on a specific command\n")
 
@@ -700,7 +706,7 @@ pd.myuid = os.getuid()
 pd.ndmcmd = sys.argv[0]
 
 pd.parser = argparse.ArgumentParser(
-    description = "Build and install bind/dhcpd config files from database",
+    description = "Manage, build and install DHCP/DNS config files",
     epilog="",
     prog=os.path.basename(pd.ndmcmd),
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -739,7 +745,9 @@ subparser_config.add_argument("--blockdomains", help="Comma-separated list of do
 subparser_config.add_argument("--create", help="Create the Network DB file", action='store_true')
 subparser_config.add_argument("--db", help="Specify alternate config file")
 subparser_config.add_argument("--dhcpglobalopt", help="Set the global DHCP option string")
+subparser_config.add_argument("--dhcpglobalinclude", help="Specify an additional DHCP include file for the global def section")
 subparser_config.add_argument("--dhcpinclude", help="Specify an additional DHCP include file")
+subparser_config.add_argument("--dhcppoolinclude", help="Specify an additional DHCP include file for the pool def section")
 subparser_config.add_argument("--dhcphostopt", help="Set a DHCP per-host option string")
 subparser_config.add_argument("--dhcplease", help="DHCP lease length in seconds [86400]")
 subparser_config.add_argument("--dhcpsubnet", "--dhcprange", help="Low and High IP addresses for DHCP server pool")

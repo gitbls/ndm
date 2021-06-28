@@ -84,6 +84,12 @@ class ndmdhcp():
             self.subfh.write("{}    }}\n\n".format(s1))
 
     def prebuild(self):
+        if self.pd.db['cfg']['dhcpglobalinclude'] != "":
+            if not os.path.isfile(self.pd.db['cfg']['dhcpglobalinclude']):
+                self.pd.xperrorexit("? Cannot find --dhcpglobalinclude file '{}'".format(self.pd.db['cfg']['dhcpglobalinclude']))
+        if self.pd.db['cfg']['dhcppoolinclude'] != "":
+            if not os.path.isfile(self.pd.db['cfg']['dhcppoolinclude']):
+                self.pd.xperrorexit("? Cannot find --dhcppoolinclude file '{}'".format(self.pd.db['cfg']['dhcppoolinclude']))
         return True
 
     def startbuild(self):
@@ -112,6 +118,13 @@ class ndmdhcp():
     key dhcp-update;\n\
     }}\n\n".format(zonename, self.pd.db['cfg']['dnsfqdn']))
                 
+    def _includefile(self, fn, ofh):
+        fopt = open(fn, 'r')
+        for line in fopt:
+            line = line.rstrip()
+            ofh.write("{}\n".format(line))
+        fopt.close()
+
     def _writedhcpconf(self, fh):
         newftime = datetime.datetime.strftime(datetime.datetime.now(), "%c")
         fh.write("# dhcpd.conf created by ndm {}\n".format(newftime))
@@ -125,6 +138,7 @@ class ndmdhcp():
         fh.write("# What to do if the client sends no hostname: pick first possible string as hostname\n")
         fh.write('ddns-hostname = pick (option fqdn.hostname, option host-name, concat("dhcp-",binary-to-ascii (16,8,"-",substring (hardware,1,6))));')
         fh.write("\n")
+        if self.pd.db['cfg']['dhcpglobalinclude'] != "": self._includefile(self.pd.db['cfg']['dhcpglobalinclude'], fh)
         fh.write("key dhcp-update {{\n\
     algorithm hmac-md5;\n\
     secret {};\n\
@@ -146,6 +160,7 @@ class ndmdhcp():
         fh.write("        default-lease-time {};\n".format(self.pd.db['cfg']['dhcplease']))
         fh.write("        max-lease-time {};\n".format(self.pd.db['cfg']['dhcplease']))
         fh.write("        range {};\n".format(self.pd.db['cfg']['dhcpsubnet']))
+        if self.pd.db['cfg']['dhcppoolinclude'] != "": self._includefile(self.pd.db['cfg']['dhcppoolinclude'], fh)
         fh.write("    }\n}\n")
         fh.write('include "{}/{}";\n'.format(self.dhcpconfdir, self.subnetfn))
         if self.pd.db['cfg']['dhcpinclude'] != "":fh.write('include "{}";\n'.format(self.pd.db['cfg']['dhcpinclude']))
