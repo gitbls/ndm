@@ -1,6 +1,13 @@
 # Changelog
 
 	
+## V2.7
+
+* Add -two new switches per request
+    * `--dhcpglobalinclude` &mdash; add additional statements to isc-dhcp-server global section
+    * `-dhcppoolinclude` &mdash; add additional statements to isc-dhcp-server pool section) per request
+* Correct --importnet typo in README
+
 ## V2.6
 
 * Fix doconfigitem where variable name change was incompletely implemented
