@@ -141,7 +141,7 @@ def  cknownos(pd):
     
 class pdat:
     def __init__(self):
-        self.version = "V2.7"
+        self.version = "V2.8"
         self.dbversion = "2"
         self.dns = None
         self.dhcp = None
@@ -182,7 +182,7 @@ class pdat:
 
     def _ckconfig(self):
         # OK if these VV options are not set. All others must be set
-        ignore = ['dhcphostopt', 'dhcpglobalopt', 'hostfqdn', 'dnsip', 'blockdomains', 'bindoptions', 'subnetmask', 'dnsinclude', 'dhcpinclude', 'internals']
+        ignore = ['dhcpglobalinclude', 'dhcppoolinclude', 'dhcphostopt', 'dhcpglobalopt', 'hostfqdn', 'dnsip', 'blockdomains', 'bindoptions', 'subnetmask', 'dnsinclude', 'dhcpinclude', 'internals']
         missing = ""
         for i in self.db['cfg']:
             if not i in ignore:
