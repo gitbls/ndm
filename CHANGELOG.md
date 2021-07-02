@@ -1,6 +1,10 @@
 # Changelog
 
 	
+## V2.8
+
+* Add the two new switches to the ignore table. Works better then.
+
 ## V2.7
 
 * Add -two new switches per request
