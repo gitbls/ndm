@@ -1,6 +1,10 @@
 # Changelog
 
 	
+## V2.9
+
+* ndm config --dhcphostopt setting was not saved. It is now
+
 ## V2.8
 
 * Add the two new switches to the ignore table. Works better then.
