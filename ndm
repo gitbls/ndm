@@ -141,7 +141,7 @@ def  cknownos(pd):
     
 class pdat:
     def __init__(self):
-        self.version = "V2.8"
+        self.version = "V2.9"
         self.dbversion = "2"
         self.dns = None
         self.dhcp = None
@@ -520,6 +520,7 @@ def cmd_config(pd):
             del(pd.db['cfg']['dhcphostopt'][els[0]])
         else:
             pd.db['cfg']['dhcphostopt'][els[0]] = els[1]
+        pd.dbmodified = pd.cmdmodified = True
 
     # Normalize externaldns and dhcpsubnet strings
     if pd.db['cfg']['externaldns'] != "": pd.db['cfg']['externaldns'] = listnormal(pd.db['cfg']['externaldns'], " ")
