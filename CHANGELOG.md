@@ -1,9 +1,13 @@
 # Changelog
 
 	
+## V2.10
+
+* Fixed ndm config --subnet setting was not saved.
+
 ## V2.9
 
-* ndm config --dhcphostopt setting was not saved. It is now
+* ndm config --dhcphostopt setting was not saved. It is now.
 
 ## V2.8
 
