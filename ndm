@@ -141,7 +141,7 @@ def  cknownos(pd):
     
 class pdat:
     def __init__(self):
-        self.version = "V2.9"
+        self.version = "V2.10"
         self.dbversion = "2"
         self.dns = None
         self.dhcp = None
@@ -465,7 +465,7 @@ def cmd_config(pd):
                 if sn[1] != "24":
                     perrorexit("? Only /24 networks currently supported")
                 pd.db['cfg']['subnetmask'] = sn[1] # Needs more work
-        pd.db['cfg']['subnet'] = sn[0]
+        doconfigitem(pd, 'subnet', sn[0])
 
     if pd.args.bindoptions != None:
         if pd.args.bindoptions != "" and not os.path.isfile(pd.args.bindoptions):
