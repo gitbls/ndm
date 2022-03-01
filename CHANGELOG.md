@@ -1,6 +1,10 @@
 # Changelog
 
 	
+## V2.11
+
+* Documentation and help corrections
+
 ## V2.10
 
 * Fixed ndm config --subnet setting was not saved.
