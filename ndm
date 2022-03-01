@@ -141,7 +141,7 @@ def  cknownos(pd):
     
 class pdat:
     def __init__(self):
-        self.version = "V2.10"
+        self.version = "V2.11"
         self.dbversion = "2"
         self.dns = None
         self.dhcp = None
@@ -808,7 +808,7 @@ subparser_modify.add_argument("--newhostname", help="New hostname")
 subparser_modify.add_argument("--note", help="New note field for the host")
 subparser_modify.set_defaults(func=cmd_modify)
 
-subparser_reip = subparsers.add_parser("reip", help="Change a hosts's IP address")
+subparser_reip = subparsers.add_parser("reip", help="Change a host's IP address")
 subparser_reip.add_argument("ip", help="IP address to change")
 subparser_reip.add_argument("--newip", help="New IP address")
 subparser_reip.add_argument("--db", help="Specify alternate config file")
