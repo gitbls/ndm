@@ -65,7 +65,7 @@ Installation consists of a few simple steps:
     * If you want to install ndm to a different directory, download EZndmInstaller and start it with `sudo EZndmInstaller /dir/for/install`. 'sudo' only required if needed for /dir/for/install write access.
     * **OR** Copy and execute this bash command
 ```
-for f in ndm ndmdnsbind.py ndmdnsmasq.py ndmdhcpisc.py ndmdhcpnone.py ; do curl -L https://raw.githubusercontent.com/gitbls/ndm/master/$f -o /usr/local/bin/$f ; done
+for f in ndm ndmdnsbind.py ndmdnsmasq.py ndmdhcpisc.py ndmdhcpnone.py ; do sudo curl -L https://raw.githubusercontent.com/gitbls/ndm/master/$f -o /usr/local/bin/$f ; done
 ```
 
 ### Timeserver installation (optional)
