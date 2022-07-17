@@ -176,7 +176,7 @@ class ndmdns():
                 rcf.write("nameservers=127.0.0.1\ndomain={}\nsearch_domains={}\n".format(self.pd.db['cfg']['domain'], self.pd.db['cfg']['domain']))
             print("% Running resolvconf to create new /etc/resolv.conf")
             r = self.pd.xdosystem("resolvconf -u")
-            for line in r.stdout.decode('utf-8'):
+            for line in r.stdout:
                 if line != "": print (line)
 #
 # DHCP class for dnsmasq
