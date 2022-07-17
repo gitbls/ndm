@@ -31,12 +31,16 @@ class ndmdns():
         self.nofile = self.osdetails[ostype]['bindconffn']
         self.bindconfdir = self.osdetails[ostype]['bindconfdir']
         self.bindrundir = self.osdetails[ostype]['bindrundir']
+        r = self.pd.xdosystem("systemctl is-enabled {}".format(self.dnsrv))
+        if r.returncode == 1:
+            if not "disabled" in r.stdout:
+                self.dnsrv = "named"
         # self.binduser not currently needed, but keep in case a future OS does
         self.binduser = self.osdetails[ostype]['binduser']
         fnsfmt = "{}/{}"
         hfn = "hosts"
         zfn = "db.{}".format(self.pd.db['cfg']['domain'])
-        rzfn = "db.{}".format(pd.db['cfg']['subnet'])
+        rzfn = "db.{}".format(self.pd.db['cfg']['subnet'])
         bzfn = "db.ndm-blocked.zone"
         blfn = "ndm-bind-blocked.conf"
         dyfn = "db.dyn.{}".format(self.pd.db['cfg']['domain'])
@@ -45,7 +49,7 @@ class ndmdns():
                                   #full-file-spec, file-handle, dont-delete-unless
         self.dnsfns = { 'hosts':        [fnsfmt.format(self.etc, hfn),          None, False],\
                         'domzone':      [fnsfmt.format(self.zdir, zfn),         None, False],\
-                        'revdomzone':   [ fnsfmt.format(self.zdir, rzfn),       None, False],\
+                        'revdomzone':   [fnsfmt.format(self.zdir, rzfn),       None, False],\
                         'blockzone':    [fnsfmt.format(self.zdir, bzfn),        None, False],\
                         'blockinclude': [fnsfmt.format(self.bindconfdir, blfn), None, False],\
                         'dynzone':      [fnsfmt.format(self.zdir, dyfn),  None, True],\
@@ -55,6 +59,18 @@ class ndmdns():
         self.ffs = 0       #Full file spec
         self.fh = 1        #File handle
         self.dontdel = 2   #Don't delete unless reset
+        #
+        # Keep track of secondary networks
+        #
+        self.osubnets = {}
+        if not self.pd.snetdb is None:
+            for sn in self.pd.snetdb['subnet']:
+                # myip and dhcpsubnet only used in revdomzone
+                self.osubnets[sn] = {}
+                self.osubnets[sn]['revdomzone'] = { 'fh':0, 'fns':fnsfmt.format(self.zdir, "db.{}".format(sn)),\
+                                                    'myip':self.pd.snetdb['subnet'][sn]['myip'], 'dhcpsubnet':self.pd.snetdb['subnet'][sn]['dhcpsubnet'] }
+                self.osubnets[sn]['revdynzone'] = { 'fh':0, 'fns':fnsfmt.format(self.zdir, "db.{}.dhcp".format(sn)),\
+                                                    'myip':self.pd.snetdb['subnet'][sn]['myip'], 'dhcpsubnet':self.pd.snetdb['subnet'][sn]['dhcpsubnet']  }
 
     def start(self):
         self.pd.xdosystem("systemctl start {}.service".format(self.dnsrv))
@@ -73,6 +89,9 @@ class ndmdns():
         self.pd.xqdelfile("{}.jnl".format(self.dnsfns['dynzone'][self.ffs]))
         self.pd.xqdelfile(self.dnsfns['revdynzone'][self.ffs])
         self.pd.xqdelfile("{}.jnl".format(self.dnsfns['revdynzone'][self.ffs]))
+        for sn in sorted(self.osubnets):
+            self.pd.xqdelfile(self.osubnets[sn]['revdynzone']['fns'])
+            self.pd.xqdelfile("{}.jnl".format(self.osubnets[sn]['revdynzone']['fns']))
         return True
 
     def emithost(self, ipaddr, hn):
@@ -84,8 +103,16 @@ class ndmdns():
             s1 = "{:<15} IN A     {}\n".format(hn, ipaddr)
             self.dnsfns['domzone'][self.fh].write(s1)
         # domain reverse file
-        if (self.pd.db['cfg']['subnet'] in ipaddr) and not ("hostsonly" in eopts) and not ("zoneonly" in eopts) and not ("dhcponly" in eopts):
-            self.dnsfns['revdomzone'][self.fh].write("{:<3} IN PTR {}.{}.\n".format(ipaddr.split('.')[3], hn, self.pd.db['cfg']['domain']))
+        if not ("hostsonly" in eopts) and not ("zoneonly" in eopts) and not ("dhcponly" in eopts):
+            if self.pd.db['cfg']['subnet'] in ipaddr:
+                self.dnsfns['revdomzone'][self.fh].write("{:<3} IN PTR {}.{}.\n".format(ipaddr.split('.')[3], hn, self.pd.db['cfg']['domain']))
+            else:
+                for sn in sorted(self.osubnets):
+                    if sn in ipaddr:
+                        self.osubnets[sn]['revdomzone']['fh'].write("{:<3} IN PTR {}.{}.\n".format(ipaddr.split('.')[3], hn, self.pd.db['cfg']['domain']))
+                        break
+                else:
+                     print("% No subnet found for host '{}' for reverse zone".format(hn))
         # hosts
         if not ("zoneonly" in eopts) and not ("dhcponly" in eopts):
             if ("nodomain" in eopts):
@@ -109,6 +136,9 @@ class ndmdns():
         for i in self.dnsfns:                      # delete old tmp files and open new files for writing
             self.pd.xqdelfile(self.pd.xmktmpfn(self.tmp,self.dnsfns[i][self.ffs]))
             self.dnsfns[i][self.fh] = open(self.pd.xmktmpfn(self.tmp, self.dnsfns[i][self.ffs]), 'w')
+        for sn in sorted(self.osubnets):
+            self.osubnets[sn]['revdomzone']['fh'] = open(self.pd.xmktmpfn(self.tmp, self.osubnets[sn]['revdomzone']['fns']), 'w')
+            self.osubnets[sn]['revdynzone']['fh'] = open(self.pd.xmktmpfn(self.tmp, self.osubnets[sn]['revdynzone']['fns']), 'w')
         self._doheaders(newdatesn)
         self._writebindconf()
         # Write blocked-domain.zone
@@ -121,6 +151,11 @@ class ndmdns():
         self._writezheader(self.dnsfns['revdynzone'][self.fh], self._gendatesn(),\
                            datetime.datetime.strftime(datetime.datetime.now(), "%c"),\
                            "{}.dhcp".format(self.pd.xipinvert(self.pd.db['cfg']['subnet'])))
+        for sn in sorted(self.osubnets):
+            self._writezheader(self.osubnets[sn]['revdynzone']['fh'], self._gendatesn(),\
+                           datetime.datetime.strftime(datetime.datetime.now(), "%c"),\
+                           "{}.dhcp".format(self.pd.xipinvert(sn)))
+#                               "@")
         return True
 
     def endbuild(self):
@@ -130,6 +165,13 @@ class ndmdns():
         self.dnsfns['revdomzone'][self.fh].write("\n$GENERATE {}-{} $ CNAME $.{}.dhcp.\n".format(slow, shigh, self.pd.xipinvert(self.pd.db['cfg']['subnet'])))
         for i in self.dnsfns:
             self.dnsfns[i][self.fh].close()
+        for sn in sorted(self.osubnets):
+            rze = self.osubnets[sn]['revdomzone']['dhcpsubnet'].split(" ")
+            slow = rze[0].split('.')[3]
+            shigh = rze[1].split('.')[3]
+            self.osubnets[sn]['revdomzone']['fh'].write("\n$GENERATE {}-{} $ CNAME $.{}.dhcp.\n".format(slow, shigh, self.pd.xipinvert(sn)))
+            self.osubnets[sn]['revdomzone']['fh'].close()
+            self.osubnets[sn]['revdynzone']['fh'].close()
         self._writeblocklist()
 
     def preinstall(self):
@@ -147,7 +189,15 @@ class ndmdns():
                 self.pd.xqdelfile(self.pd.xmkbakfn(self.dnsfns[i][self.ffs]))
                 self.pd.xqrename(self.dnsfns[i][self.ffs], self.pd.xmkbakfn(self.dnsfns[i][self.ffs]))
                 self.pd.xcopy(self.pd.xmktmpfn(self.tmp, self.dnsfns[i][self.ffs]), self.dnsfns[i][self.ffs])
+        # set-group-id for bind so it can write dyn files
         os.chmod(self.zdir, 0o2775)
+        for sn in sorted(self.osubnets):
+            for inst in [ 'revdomzone', 'revdynzone' ]:
+                fn = self.osubnets[sn][inst]['fns']
+                print("  {}".format(fn))
+                self.pd.xqdelfile(self.pd.xmkbakfn(fn))
+                self.pd.xqrename(fn, self.pd.xmkbakfn(fn))
+                self.pd.xcopy(self.pd.xmktmpfn(self.tmp, fn), fn)
         # Handle named.conf/named.conf.options
         if not os.path.isfile("{}.orig".format(self.xnofile)):
             self.pd.xqrename(self.xnofile, "{}.orig".format(self.xnofile))
@@ -164,7 +214,7 @@ class ndmdns():
         if not 'DNSUpdateKey' in self.pd.db['cfg']:
             tsiggen = "/sbin/tsig-keygen" if os.path.isfile("/sbin/tsig-keygen") else "/usr/sbin/tsig-keygen"
             r = self.pd.xdosystem("{} -a hmac-md5 dhcp-update".format(tsiggen))
-            for line in r.stdout.decode('utf-8').split("\n"):
+            for line in r.stdout.split("\n"):
                 if 'secret' in line:
                     self.pd.db['cfg']['DNSUpdateKey'] = line.split('"')[1]
                     return True
@@ -173,6 +223,9 @@ class ndmdns():
     def diff(self, fundiff):
         for i in self.dnsfns:
             fundiff(self.pd, self.dnsfns[i][self.ffs])
+        for sn in sorted(self.osubnets):
+            fundiff(self.pd, self.osubnets[sn]['revdomzone']['fns'])
+            fundiff(self.pd, self.osubnets[sn]['revdynzone']['fns'])
         return True
 
     def chroot(self):
@@ -201,7 +254,8 @@ class ndmdns():
     def _writezheader(self, fl, newdatesn, newftime, origin):
         # Writes the zone header in a zone file
         sorigin = "$ORIGIN {}.\n".format(origin) if origin != "" else ""
-        sdomain = "{}.".format(origin) if origin != "" else "@"
+        if origin == "@": sorigin = ""
+        sdomain = "{}.".format(origin) if (origin != "" and origin != "@") else "@"
         szname = origin if origin != "" else self.pd.db['cfg']['domain']
         headstrings = ["; {} {} created by ndm {}\n".format(newdatesn, szname, newftime),\
                    "$TTL	86400    ; 24 hours. could have been written as 24h or 1d\n",\
@@ -245,14 +299,19 @@ class ndmdns():
         else:
             odns = "1.1.1.1; 1.0.0.1;"
         with open(self.pd.xmktmpfn(self.tmp, self.nofile), 'w') as fl:
-            sinternals = "" if self.pd.db['cfg']['internals'] == "" else "{};".format(self.pd.db['cfg']['internals'])
+            sinternals = "127.0.0.0/8; {}.0/24".format(self.pd.db['cfg']['subnet'])
+            if self.pd.db['cfg']['internals'] != "": sinternals = "{}; {}".format(sinternals, self.pd.db['cfg']['internals'].strip(";"))
+            listenips = self.pd.db['cfg']['myip']
+            for sn in sorted(self.osubnets):
+                sinternals = "{}; {}.0/24".format(sinternals, sn)
+                listenips = "{}; {}".format(listenips, self.osubnets[sn]['revdomzone']['myip'])
             fl.write('\n\
 // named.conf.options created by ndm\n\
 // Consider adding the 1918 zones here, if they are not used in your\n\
 // organization\n\
 //include "/etc/bind/zones.rfc1918";\n\
 \n\
-    acl internals {{ 127.0.0.0/8; {}.0/24; {} }};\n\
+    acl internals {{ {}; }};\n\
 \n\
 options {{\n\
     directory "{}";\n\
@@ -263,7 +322,7 @@ options {{\n\
     allow-query {{ internals; }};\n\
     allow-query-cache {{ internals; }};\n\
     allow-recursion {{ internals; }};\n\
-    forwarders {{ {} }};\n'.format(self.pd.db['cfg']['subnet'], sinternals, self.bindrundir, self.pd.db['cfg']['dnslistenport'], self.pd.db['cfg']['myip'], odns))
+    forwarders {{ {} }};\n'.format(sinternals, self.bindrundir, self.pd.db['cfg']['dnslistenport'], listenips, odns))
             if self.pd.db['cfg']['bindoptions'] != "":
                 # Handle bindoptions 
                 if not os.path.isfile(self.pd.db['cfg']['bindoptions']): self.pd.xperrorexit("? --bindoptions file '{}' not found".format(self.pd.db['cfg']['bindoptions']))
@@ -295,6 +354,9 @@ include "{}/rndc.key";\n'.format(self.pd.db['cfg']['DNSUpdateKey'], self.bindcon
             self._writezonedef(fl, "{}".format(self.pd.db['cfg']['domain']), "{}/db.{}".format(self.zdir, self.pd.db['cfg']['domain']))
             self._writezonedef(fl, "{}.dhcp".format(self.pd.xipinvert(self.pd.db['cfg']['subnet'])), "{}/db.{}.dhcp".format(self.zdir, self.pd.db['cfg']['subnet']))
             self._writezonedef(fl, "dyn.{}".format(self.pd.db['cfg']['domain']), "{}/db.dyn.{}".format(self.zdir, self.pd.db['cfg']['domain']))
+            for sn in sorted(self.osubnets):
+                self._writezonedef(fl, "{}.in-addr.arpa".format(self.pd.xipinvert(sn)), "{}/db.{}".format(self.zdir, sn))
+                self._writezonedef(fl, "{}.dhcp".format(self.pd.xipinvert(sn)), "{}/db.{}.dhcp".format(self.zdir, sn))
             fl.write('\ninclude "{}";\n'.format(self.dnsfns['blockinclude'][self.ffs]))  # Include db.ndm-blocked
             if self.pd.db['cfg']['dnsinclude'] != "": fl.write('\ninclude "{}";\n'.format(self.pd.db['cfg']['dnsinclude']))  # site-local include
 
@@ -322,6 +384,10 @@ include "{}/rndc.key";\n'.format(self.pd.db['cfg']['DNSUpdateKey'], self.bindcon
         self._writezheader(self.dnsfns['domzone'][self.fh], newdatesn, newftime, self.pd.db['cfg']['domain'])
         # dns reverse zone
         self._writezheader(self.dnsfns['revdomzone'][self.fh], newdatesn, newftime, "{}.in-addr.arpa".format(self.pd.xipinvert(self.pd.db['cfg']['subnet'])))
+        for sn in sorted(self.osubnets):
+            self._writezheader(self.osubnets[sn]['revdomzone']['fh'], self._gendatesn(),\
+                           datetime.datetime.strftime(datetime.datetime.now(), "%c"),\
+                           "{}.in-addr.arpa".format(self.pd.xipinvert(sn)))
         # hosts file
         flh = self.dnsfns['hosts'][self.fh]
         flh.write("#/etc/hosts created by ndm {}\n#\n".format(newftime))
@@ -344,5 +410,5 @@ include "{}/rndc.key";\n'.format(self.pd.db['cfg']['DNSUpdateKey'], self.bindcon
                 rcf.write(self.resolvconf.format(self.pd.db['cfg']['domain'], self.pd.db['cfg']['domain'], self.pd.db['cfg']['domain']))
                 print("% Running resolvconf to create new /etc/resolv.conf")
                 r = self.pd.xdosystem("resolvconf -u")
-                for line in r.stdout.decode('utf-8'):
+                for line in r.stdout:
                     if line != "": print (line)

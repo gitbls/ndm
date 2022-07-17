@@ -3,12 +3,14 @@
 """
 ndm manages a (json-formatted) database that contains network configuration details.
 The network configuration consists of network element information (DNS, DHCP, timeserver,
-router, etc) and hosts. A host definition contains the device MAC address, its assigned
-IP address, and other network configuration information.
+router, etc) and hosts.
+
+A host definition contains the device MAC address, its assigned IP address,
+and other network configuration information.
 
 ndm uses the database to build configuration files for DNS and DHCP servers.
 
-Supported DNS and DHCP servers include:
+Supported DNS and DHCP servers pairs include:
 
 * bind9 (DNS) and isc-dhcp-server (DHCP)
 * dnsmasq (both DNS and DHCP)
@@ -50,7 +52,7 @@ def qrename(src, dst):
         pass
 
 def dosystem(docmd):
-    r = subprocess.run(docmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+    r = subprocess.run(docmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True, text=True)
     return r
 
 def mktmpdir(pd):
@@ -118,7 +120,7 @@ def dodiff(pd, fnm):
     r = dosystem("diff {} {}".format(fnm, mktmpfn(pd.tmp, fnm)))
     # diff returns: 0:identical, 1:different, 2:trouble
     rs = r.stdout if (r.returncode == 0) or (r.returncode == 1) else r.stderr
-    for line in rs.decode('utf-8').split("\n"):
+    for line in rs.split("\n"):
         print(line)
     return True
 
@@ -141,8 +143,9 @@ def  cknownos(pd):
     
 class pdat:
     def __init__(self):
-        self.version = "V2.11"
+        self.version = "V2.12"
         self.dbversion = "2"
+        self.snetdbversion = "1"
         self.dns = None
         self.dhcp = None
         self.args = None
@@ -153,8 +156,10 @@ class pdat:
         self.tmp = "/tmp"
         self.configfile = ""
         self.defaultconfigfile = "/etc/dbndm.json"
+        self.snetconfigfile = "/etc/dbndmsnet.json"
         self.db = None
         self.dbmodified = False
+        self.snetdb = None
         self.cmdmodified = False #db modified b/c db config cmd switch
         self.dnsmasqfh = None
         # These functions available to ndmdns and ndmdhcp classes 
@@ -308,20 +313,22 @@ class pdat:
             self.db['cfg']['dnsip'] = self.db['cfg']['myip']
             self.dbmodified = True
 
-    def dbwrite(self):
-        if not self.dbmodified: return True
-        # Don't use mktmpfn...goes to tmp directory
-        tmpf = "{}.tmp".format(self.configfile)
-        bakf = mkbakfn(self.configfile)
+    def writedbjson(self, cfile, jdata):
+        tmpf = "{}.tmp".format(cfile)
+        bakf = mkbakfn(cfile)
         try:
             with open(tmpf, 'w') as dbf:
-                json.dump(self.db, dbf, indent=4, sort_keys=True)
+                json.dump(jdata, dbf, indent=4, sort_keys=True)
                 dbf.write("\n") #Final eol
         except:
             perrorexit("? Error writing '{}'".format(tmpf))
         qdelfile(bakf)
-        qrename(self.configfile, bakf)
-        qrename(tmpf, self.configfile)
+        qrename(cfile, bakf)
+        qrename(tmpf, cfile)
+
+    def dbwrite(self, force=False):
+        if not (self.dbmodified or force): return True
+        self.writedbjson(self.configfile, pd.db)
         self.dbmodified = False
 
     def dbimport(self):
@@ -374,6 +381,23 @@ class pdat:
             dofunc(self, keyname, self.listformat)
         return True
 
+    def snetdbread(self, mustexist):
+        try:
+            with open(self.snetconfigfile, 'r') as snf:
+                try:
+                    self.snetdb = json.load(snf)
+                except ValueError:
+                    perrorexit("? ndm network configuration database '{}' has invalid syntax".format(self.snetconfigfile))
+                return True
+        except:
+            if mustexist: perrorexit("? Secondary subnet database '{}' not found".format(pd.snetconfigfile))
+            pass
+
+        return False
+
+    def snetdbwrite(self):
+        self.writedbjson(self.snetconfigfile, self.snetdb)
+
 def getmodifyhostname(pd, keyname, hname, withwhat):
     if len(pd.db['hosts'][keyname]['hostname']) > 1:
         s1 = "" if withwhat == "" else "with {}".format(withwhat)
@@ -382,6 +406,7 @@ def getmodifyhostname(pd, keyname, hname, withwhat):
         return hname
     else:
         return list(pd.db['hosts'][keyname]['hostname'].keys())[0] #Fetch solitary hostname
+
 
 def cmd_add(pd):
     keyname = pd.args.ip
@@ -404,6 +429,23 @@ def cmd_add(pd):
                  ehost=pd.args.hostname, eopts=eopts, enote=pd.args.note)
     pd.dbwrite()
     return True
+
+def cksubnetdetails(pd):
+    if pd.snetdb is None: return
+    snetissues = {}
+    for sn in pd.snetdb['subnet']:
+        for item in [ 'myip', 'dhcpsubnet', 'dns', 'gateway', 'timeserver' ]:
+            if pd.snetdb['subnet'][sn][item] == "":
+                if not sn in snetissues: snetissues[sn] = []
+                snetissues[sn].append(item)
+    if len(snetissues) == 0: return
+    print("? Errors found in subnet definition(s)")
+    for sn in snetissues:
+        eitems = ""
+        for s in snetissues[sn]:
+            eitems = "{} {}".format(eitems, s)
+        print("  Subnet: {} missing: {}".format(sn, eitems))
+    perrorexit("? Correct subnet definition(s) before doing build")
 
 def buildoutputhost(pd, keyname, listfmt):
     # Called by dbdoallnodes for each host
@@ -428,6 +470,7 @@ def cmd_build(pd):
     if pd.args.dhcpinclude != None:
         svdhcpincl = pd.db['cfg']['dhcpinclude']
         pd.db['cfg']['dhcpinclude'] = pd.args.dhcpinclude
+    cksubnetdetails(pd)
     pd.dns.prebuild()
     pd.dhcp.prebuild()
     pd.dns.startbuild()
@@ -562,8 +605,7 @@ def cmd_delete(pd):
             del pd.db['cname'][keyname]
         else:
             perrorexit("? IP address '{}' is not in the database".format(keyname))
-    pd.dbmodified = True
-    pd.dbwrite()
+    pd.dbwrite(force=True)
     return True
     
 def cmd_diff(pd):
@@ -635,8 +677,7 @@ def cmd_modify(pd):
     if eopts != "":
         hname = getmodifyhostname(pd, keyname, hname, "modifying DHCP/DNS attributes")
         pd.db['hosts'][keyname]['hostname'][hname]['flags'] = eopts
-    pd.dbmodified = True
-    pd.dbwrite()
+    pd.dbwrite(force=True)
     return True
     
 def cmd_reip(pd):
@@ -651,8 +692,7 @@ def cmd_reip(pd):
         del pd.db['hosts'][keyname]
     else:
         perrorexit("? IP address '{}' is not in the database".format(keyname))
-    pd.dbmodified = True
-    pd.dbwrite()
+    pd.dbwrite(force=True)
     return True
     
 def cmd_show(pd):
@@ -677,6 +717,127 @@ def cmd_show(pd):
                 printnode(pd, keyname, pd.listformat)
     return True
     
+def cmd_addsubnet(pd):
+    if pd.snetdb is not None:
+        if pd.args.subnet in pd.snetdb['subnet']: perrorexit("? Subnet '{}' already defined".format(pd.args.subnet))
+    else:
+        pd.snetdb = {}
+        pd.snetdb['subnet'] = {}
+        pd.snetdb['dbversion'] = pd.snetdbversion
+    # dns, gateway, timeserver
+    dhcpsubnet = "" if pd.args.dhcpsubnet is None else listnormal(pd.args.dhcpsubnet, " ")
+    dns = "" if pd.args.dns is None else pd.args.dns
+    gateway = "" if pd.args.gateway is None else pd.args.gateway
+    myip = "" if pd.args.myip is None else pd.args.myip
+    mask = "" if pd.args.mask is None else pd.args.mask
+    name = "" if pd.args.name is None else pd.args.name
+    timeserver = "" if pd.args.timeserver is None else pd.args.timeserver
+    pd.snetdb['subnet'][pd.args.subnet] = { 'myip':myip,  'dhcpsubnet':dhcpsubnet, 'dns':dns, 'gateway':gateway, 'mask':mask, 'name':name, 'timeserver':timeserver }
+    pd.snetdbwrite()
+
+def cmd_delsubnet(pd):
+    if pd.args.subnet in pd.snetdb['subnet']:
+        del(pd.snetdb['subnet'][pd.args.subnet])
+        print("% Deleted subnet '{}'".format(pd.args.subnet))
+    else:
+        perrorexit("? Subnet '{}' is not a secondary network".format(pd.args.subnet))
+    pd.snetdbwrite()
+    return
+
+def cmd_modsubnet(pd):
+    if pd.args.subnet in pd.snetdb['subnet']:
+        if not pd.args.dhcpsubnet is None: pd.snetdb['subnet'][pd.args.subnet]['dhcpsubnet'] = listnormal(pd.args.dhcpsubnet, " ")
+        if not pd.args.myip is None: pd.snetdb['subnet'][pd.args.subnet]['myip'] = pd.args.myip
+        if not pd.args.dns is None: pd.snetdb['subnet'][pd.args.subnet]['dns'] = pd.args.dns
+        if not pd.args.gateway is None: pd.snetdb['subnet'][pd.args.subnet]['gateway'] = pd.args.gateway
+        if not pd.args.mask is None: pd.snetdb['subnet'][pd.args.subnet]['mask'] = pd.args.mask
+        if not pd.args.name is None: pd.snetdb['subnet'][pd.args.subnet]['name'] = pd.args.name
+        if not pd.args.timeserver is None: pd.snetdb['subnet'][pd.args.subnet]['timeserver'] = pd.args.timeserver
+        print("% Modified subnet '{}'".format(pd.args.subnet))
+    else:
+        perrorexit("? Subnet '{}' is not a secondary network".format(pd.args.subnet))
+    pd.snetdbwrite()
+    return
+
+def cmd_showsubnet(pd):
+    if pd.snetdb != None and 'subnet' in pd.snetdb:
+        if not pd.args.subnet is None:
+            sn = pd.args.subnet
+            #print("{:11} {:16}{:16} {}".format("Subnet", "Subnet Name", "My Subnet IP", "Subnet DHCP Range"))
+            if sn in pd.snetdb['subnet']:
+                print("{:11} {:16}{:16}{:16}{:16}{:16}{}".format(sn, pd.snetdb['subnet'][sn]['name'],\
+                                                                      pd.snetdb['subnet'][sn]['myip'],\
+                                                                      pd.snetdb['subnet'][sn]['dns'],\
+                                                                      pd.snetdb['subnet'][sn]['gateway'],\
+                                                                      pd.snetdb['subnet'][sn]['timeserver'],\
+                                                                      pd.snetdb['subnet'][sn]['dhcpsubnet'])) #???, pd.snetdb['subnet'][sn]['mask']
+        else:
+            print("{:11} {:16}{:16}{:16}{:16}{:16} {}".format("Subnet", "Subnet Name", "My Subnet IP", "DNS Server", "Gateway", "Timeserver", "Subnet DHCP Range"))
+            for sn in sorted(pd.snetdb['subnet']):
+                print("{:11} {:16}{:16}{:16}{:16}{:16} {}".format(sn, pd.snetdb['subnet'][sn]['name'],\
+                                                                  pd.snetdb['subnet'][sn]['myip'],\
+                                                                  pd.snetdb['subnet'][sn]['dns'],\
+                                                                  pd.snetdb['subnet'][sn]['gateway'],\
+                                                                  pd.snetdb['subnet'][sn]['timeserver'],\
+                                                                  pd.snetdb['subnet'][sn]['dhcpsubnet'])) #???, pd.snetdb['subnet'][sn]['mask']
+    return
+
+def remove_prefix(s, prefix):
+    return s[len(prefix):] if s.startswith(prefix) else s
+
+def chghostsubnet(pd, oldsubnet, newsubnet):
+    delist = []
+    for ip in pd.db['hosts']:
+        if oldsubnet in ip:
+            # Flag this IP to replace
+            delist.append(ip)
+    for ip in delist:
+        # Copy new entry from old, then delete old one
+        nip = "{}{}".format(newsubnet, remove_prefix(ip, oldsubnet))
+        pd.db['hosts'][nip] = {}
+        pd.db['hosts'][nip]['dhcphostopt'] = pd.db['hosts'][ip]['dhcphostopt']
+        pd.db['hosts'][nip]['hostname'] = pd.db['hosts'][ip]['hostname']
+        del(pd.db['hosts'][ip])
+        print("% Renamed host '{}' to '{}'".format(ip, nip))
+    return
+
+def cmd_resubnet(pd):
+    if pd.args.oldsubnet == pd.db['cfg']['subnet']:
+        chghostsubnet(pd, pd.args.oldsubnet, pd.args.newsubnet)
+        # Update configuration: dhcpsubnet, dnsip, gateway, internals, myip, subnet, timeserver, and dhcphostopts
+        for c in ['dhcpsubnet', 'dnsip', 'gateway', 'internals', 'myip', 'subnet', 'timeserver' ]:
+            if pd.args.oldsubnet in pd.db['cfg'][c]:
+                oldval = pd.db['cfg'][c]
+                pd.db['cfg'][c] = pd.db['cfg'][c].replace(pd.args.oldsubnet, pd.args.newsubnet)
+                print("% Updated ndm config '{}' from '{}' to '{}'".format(c, oldval, pd.db['cfg'][c]))
+        if len(pd.db['cfg']['dhcphostopt']) > 0:
+            for i in pd.db['cfg']['dhcphostopt']:
+                if pd.args.oldsubnet in pd.db['cfg']['dhcphostopt'][i]:
+                    oldval = pd.db['cfg']['dhcphostopt'][i]
+                    pd.db['cfg']['dhcphostopt'][i] = pd.db['cfg']['dhcphostopt'][i].replace(pd.args.oldsubnet, pd.args.newsubnet)
+                    print("% Updated dhcphostopt '{}' from '{}' to '{}'".format(i, oldval, pd.db['cfg']['dhcphostopt'][i]))
+        pd.dbwrite(force=True)
+        return
+    else:
+        if pd.snetdb is not None:
+            if pd.args.oldsubnet in pd.snetdb['subnet']:
+                chghostsubnet(pd, pd.args.oldsubnet, pd.args.newsubnet)
+                pd.snetdb['subnet'][pd.args.newsubnet] = pd.snetdb['subnet'][pd.args.oldsubnet]
+                pd.snetdb['subnet'][pd.args.newsubnet]['myip'] = pd.snetdb['subnet'][pd.args.newsubnet]['myip'].replace(pd.args.oldsubnet, pd.args.newsubnet)
+                pd.snetdb['subnet'][pd.args.newsubnet]['dhcpsubnet'] = pd.snetdb['subnet'][pd.args.newsubnet]['dhcpsubnet'].replace(pd.args.oldsubnet, pd.args.newsubnet)
+                del(pd.snetdb['subnet'][pd.args.oldsubnet])
+                print("% Renamed secondary subnet '{}' to '{}'".format(pd.args.oldsubnet, pd.args.newsubnet))
+                if len(pd.db['cfg']['dhcphostopt']) > 0:
+                    for i in pd.db['cfg']['dhcphostopt']:
+                        if pd.args.oldsubnet in pd.db['cfg']['dhcphostopt'][i]:
+                            oldval = pd.db['cfg']['dhcphostopt'][i]
+                            pd.db['cfg']['dhcphostopt'][i] = pd.db['cfg']['dhcphostopt'][i].replace(pd.args.oldsubnet, pd.args.newsubnet)
+                            print("% Updated dhcphostopt '{}' from '{}' to '{}'".format(i, oldval, pd.db['cfg']['dhcphostopt'][i]))
+                pd.dbwrite(force=True)
+                pd.snetdbwrite()
+                return
+    perrorexit("? Subnet '{}' not found".format(pd.args.oldsubnet))
+
 def cmd_help(pd):
     xdm = pd.ndmcmd
     xnm = os.path.basename(xdm)
@@ -712,7 +873,7 @@ pd.parser = argparse.ArgumentParser(
     prog=os.path.basename(pd.ndmcmd),
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-pd.parser.set_defaults(func=cmd_help, ckcfg=False, create=False, db=None, loadsrv=False, mktmpdir=False, tmp=None, usedb=True)
+pd.parser.set_defaults(func=cmd_help, ckcfg=False, create=False, db=None, loadsrv=False, mktmpdir=False, tmp=None, snetmust=False, usedb=True)
 
 addmodify_parent_parser = argparse.ArgumentParser(add_help=False)
 addmodify_parent_parser.add_argument("--dhcponly", help="Only put this host in dhcpd.conf (no hosts or DNS config entries)", action='store_true')
@@ -814,10 +975,47 @@ subparser_reip.add_argument("--newip", help="New IP address")
 subparser_reip.add_argument("--db", help="Specify alternate config file")
 subparser_reip.set_defaults(func=cmd_reip)
 
+subparser_resubnet = subparsers.add_parser("resubnet", help="Change the subnet's IP Address")
+subparser_resubnet.add_argument("oldsubnet", help="Subnet to change")
+subparser_resubnet.add_argument("newsubnet", help="New subnet")
+subparser_resubnet.set_defaults(func=cmd_resubnet)
+
 subparser_show = subparsers.add_parser("show", help="Show a single host")
 subparser_show.add_argument("host", help="Full or partial hostname/IP/MAC host to show")
 subparser_show.add_argument("--db", help="Specify alternate config file name")
 subparser_show.set_defaults(func=cmd_show)
+
+# addsubnet, delsubnet, showsubnet, modsubnet
+
+subparser_addsubnet = subparsers.add_parser("addsubnet", help="Add secondary subnet")
+subparser_addsubnet.add_argument("subnet", help="Secondary subnet to add [su.bn.et]")
+subparser_addsubnet.add_argument("--dhcpsubnet", help="Low and high IP addresses for DHCP server range")
+subparser_addsubnet.add_argument("--dns", help="DNS Server IP Address")
+subparser_addsubnet.add_argument("--gateway", help="Gateway IP Address")
+subparser_addsubnet.add_argument("--myip", help="Local IP address in subnet")
+subparser_addsubnet.add_argument("--mask", help="Secondary subnet mask")
+subparser_addsubnet.add_argument("--name", help="Secondary subnet name")
+subparser_addsubnet.add_argument("--timeserver", help="TimeServer IP Address")
+subparser_addsubnet.set_defaults(func=cmd_addsubnet)
+
+subparser_delsubnet = subparsers.add_parser("delsubnet", help="Delete secondary subnet")
+subparser_delsubnet.add_argument("subnet", help="Secondary subnet to delete")
+subparser_delsubnet.set_defaults(func=cmd_delsubnet, snetmust=True)
+
+subparser_modsubnet = subparsers.add_parser("modsubnet", help="Modify secondary subnet")
+subparser_modsubnet.add_argument("subnet", help="Secondary subnet to modify [su.bn.et]")
+subparser_modsubnet.add_argument("--dhcpsubnet", help="Low and high IP addresses for DHCP server range")
+subparser_modsubnet.add_argument("--dns", help="DNS Server IP Address")
+subparser_modsubnet.add_argument("--gateway", help="Gateway IP Address")
+subparser_modsubnet.add_argument("--myip", help="Local IP address in subnet")
+subparser_modsubnet.add_argument("--mask", help="Secondary subnet mask")
+subparser_modsubnet.add_argument("--name", help="Secondary subnet name")
+subparser_modsubnet.add_argument("--timeserver", help="TimeServer IP Address")
+subparser_modsubnet.set_defaults(func=cmd_modsubnet, snetmust=True)
+
+subparser_showsubnet = subparsers.add_parser("showsubnet", help="Show secondary subnet")
+subparser_showsubnet.add_argument("subnet", nargs='?', help="Secondary subnet to show")
+subparser_showsubnet.set_defaults(func=cmd_showsubnet, snetmust=True)
 
 subparser_version = subparsers.add_parser("version", help="Print {} version".format(pd.ndmcmd))
 subparser_version.set_defaults(func=cmd_version, usedb=False)
@@ -828,6 +1026,7 @@ subparser_help.set_defaults(func=cmd_help, usedb=False)
 pd.args = pd.parser.parse_args()
 if pd.args.usedb:
     pd.dbread(ckcfg=pd.args.ckcfg)
+    pd.snetdbread(pd.args.snetmust)
     if pd.args.mktmpdir: mktmpdir(pd)
     if pd.args.loadsrv:
         if pd.db['cfg']['dns'] != "": loadmodule(pd, pd.knowndns[pd.db['cfg']['dns']], "dns")
