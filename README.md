@@ -1,4 +1,4 @@
-ndm DNS and DHCP Server subnet configuration manager
+ndm DNS and DHCP Server configuration manager
 
 ## Overview
 
@@ -30,7 +30,7 @@ If you find ndm useful, please consider starring it to help me understand how ma
 * **Per-host DHCP attributes** can be set (isc-dhcp-server only)
     * Easily configure for PXE boot, special DNS servers, or other per-host specific customizations
 * **Easy-to-use command line** to add/modify/list/delete preconfigured device IP addresses
-* **List on the terminal or export the ndm database** in ndm import format (See "Importing a network database" below)
+* **List on the terminal or export the ndm database** in ndm import format (See [Importing a Network Database](https://github.com/gitbls/ndm#importing-a-network-database))
 * Building and installing the configuration files is a **simple two-step process** (build followed by install) to enable you to ensure config file correctness and/or do custom updates if desired before the configuration files are moved into the system directories.
 * Includes a basic **DNS domain block list** feature
 * Leverages **industry-proven** bind9, isc-dhcp-server, or dnsmasq for DNS and DHCP services
@@ -39,21 +39,21 @@ With the V2 release, ndm continues to support bind9 for DNS and isc-dhcp-server 
 
 **What relevant features are not in V2?**
 
-Since my specific network is fully supported, I'm good :) :) However, there are a few obvious enhancements that I expect to look into. These include:
+There are a few obvious enhancements that I think are needed. These include:
 
-* Only /24 networks are supported. This includes 192.168.n.* for any 'n'.
-* No IPV6 support. A bit more work, but should be done.
-* ndm is fully tested and supported on RasPiOS (Stretch and Buster). Other distros may require minor work (config file names/locations). Let me know what OS are important for you.
-* Nameserver failover, although this can be done with an external script. See section "Nameserver failover" below.
+* Only /24 networks are supported at the moment. This includes 192.168.n.* for any 'n'. 
+* IPV6 support
+* Service failover. Redunancy of critical services is a great idea, so may get implemented soon.
+* ndm is fully tested and supported on RasPiOS (Stretch and Buster) and Debian Bullseye. ndm needs to know the config directory/filenames for bind9, isc-dhcp-server, and/or dnsmasq, and some distros relocate these from their Debian-standard locations. If your distro doesn't work, let me know.
 * chroot configuration for the bind DNS server has been removed. Please let me know if this is important for you.
 
-## Installation on RasPiOS
+## Installation
 
-Installation consists of a few simple steps:
+Installation is a few simple steps:
 
 * **Copy ndm** to the system where you are planning to run ndm/DNS/DHCP
-* Optionally **install a timeserver** on your LAN
-* **Decide** if you're using bind/isc-dhcp-server (more full-featured) or dnsmasq (for both DHCP and DNS). See the section "How do I choose between bind9/isc-dhcp-server and dnsmasq" later in this document.
+* Optionally **install a timeserver** on your LAN. This can easily run on the same system as ndm/DNS/DHCP
+* **Decide** if you're using bind/isc-dhcp-server (more full-featured) or dnsmasq (for both DHCP and DNS). See [How do I choose between bind9/isc-dhcp-server and dnsmasq](https://github.com/gitbls/ndm#how-do-i-choose-betwen-bind9isc-dhcp-server-and-dnsmasq)
 * **Install** the DHCP and DNS servers
 * **Configure ndm** 
 * **Add hosts** to the ndm database
@@ -105,7 +105,7 @@ You'll still be able to start and stop the service, but this will ensure that th
 
 ### Configure ndm/DNS/DHCP host with static IP Address
 
-Linux provides several different ways to configure the network, and any of them will work, of course, if properly configured. I recommend using *dhcpcd* or *systemd-networkd* to configure the network on the system that is hosting ndm/DNS/DHCP. systemd-networkd is the most lightweight, and easy-to-configure mechanism for the static IP use case. Here are the steps:
+Linux provides several different ways to configure the network, and any of them will work, of course, once properly configured. I recommend using *dhcpcd* or *systemd-networkd* to configure the network on the system that is hosting ndm/DNS/DHCP. systemd-networkd is the most lightweight, and easy-to-configure mechanism for the static IP use case. Here are the steps:
 
 * **Enable systemd-networkd:** `sudo systemctl enable systemd-networkd`
 * **Disable dhcpcd:** `sudo systemctl disable dhcpcd`
@@ -140,7 +140,7 @@ Reboot, verify your network configuration, and then proceed with ndm configurati
 
 ### Configure ndm
 
-The examples in this document use subnet 192.168.42.0/24. Adjust this as appropriate for your network configuration. It also assumes that computer *mypi* is at 192.168.42.2 and is running *ntp* or *chrony* (time service) and a mail server as well as ndm/DNS/DHCP.
+The examples in this document use subnet 192.168.42.0/24. Adjust this as appropriate for your network configuration. It also assumes that computer *mypi* is at 192.168.42.2 and is running a time service (*ntp* or *chrony*), and a mail server as well as ndm/DNS/DHCP.
 
 **NOTE:** ndm does not require a mail server. ndm will default the mail server to your ndm/DNS/DHCP server. If you have a mail server, change it with `ndm config --mxfqdn mymailserver.mydomain.com`
 
@@ -162,13 +162,13 @@ The examples in this document use subnet 192.168.42.0/24. Adjust this as appropr
 * Display and review the ndm configuration: `sudo ndm config --list`
 
 * You must also specify which DNS and DHCP servers to use with the `--dns` and `--dhcp` switches. Legal values are
-    * **DNS:**&nbsp;&nbsp;&nbsp;`--dns bind` and `--dns dnsmasq`
+    * **DNS:**&nbsp;&nbsp;&nbsp;`--dns bind` or `--dns dnsmasq`
     * **DHCP:**&nbsp;`--dhcp isc-dhcp-server`, `--dhcp dnsmasq`, or `--dhcp none`
     * Your ndm host is now configured for basic operation!
 
 ### Add hosts
 
-Add your hosts, either via a set of ndm commands or by importing a properly formatted network database. See "Importing a network database" and "Day-to-day management tasks" below. Note that ndm will automatically add the hostname of the system on which it is running to the database.
+Add your hosts, either via a set of ndm commands or by importing a properly formatted network database. See [Importing a Network Database](https://github.com/gitbls/ndm#importing-a-network-database) and [Day-to-day management tasks](https://github.com/gitbls/ndm#day-to-day-management-tasks). Note that ndm will automatically add the hostname of the system on which it is running to the database.
 
 * `sudo ndm add 192.168.42.4 --hostname mypitest --mac nn:nn:nn:nn:nn:nn --note "RPi for testing"`
 
@@ -176,8 +176,8 @@ See below for full details for the add command.
 
 ### Build, Install, and Test
 
-* **Build** the DNS and DHCP configuration files into a directory in /tmp: `sudo ndm build`
-* **Install** the DNS and DHCP configuration files into the system directories: `sudo ndm install`
+* **Build** the DNS and DHCP configuration files into a sub-directory in /tmp: `sudo ndm build`
+* **Install** the DNS and DHCP configuration files from /tmp into the system directories: `sudo ndm install`
 * **Start** the DNS and DHCP servers: `sudo systemctl start bind9; sudo systemctl start isc-dhcp-server` OR `sudo systemctl start dnsmasq` **NOTE:** Please read the section "Introducing a new DHCP Server onto the Network" at the end of this README **BEFORE** you start your new DHCP server.
 * Resolve any errors identified in the system log
 
@@ -279,7 +279,7 @@ The files are created in a temporary directory and are not in use until you `sud
 
 **config &mdash;** Manage the ndm configuration database
 
-The *config* command controls the site configuration database, and is used to do bulk import of host definitions. See the section "Importing a network database" below for details on bulk importing. An *ndm config* command with no switches defaults to `sudo ndm config --list`.
+The *config* command controls the site configuration database, and is used to do bulk import of host definitions. See [Importing a Network Database](https://github.com/gitbls/ndm#importing-a-network-database) for details on bulk importing. An *ndm config* command with no switches defaults to `sudo ndm config --list`.
 
 **delete &mdash;** Delete an entry from the database
 
@@ -305,11 +305,15 @@ You must specify the IP address. When renaming the hostname associated with an I
 
 The --mac and --note switches and the various flags are attached to the hostname. The --dhcphostopt switch is attached to the IP address, so a hostname is not required when changing this setting.
 
-**reip &mdash;** Change the IP address for all hosts assigned to the given IP address.
+**reip &mdash;** Change the IP address for all hosts assigned to the specified IP address.
+
+**resubnet &mdash;** Change the subnet for a network. See [Changing the IP range of a network](https://github.com/gitbls/ndm#changing-the-ip-range-of-a-network) below.
 
 **show &mdash;** Display an entry or set of entries
 
 The argument can be an IP address (must fully match), part of a MAC address, or part of a host name. In the latter two cases, all matching entries are shown.
+
+**adsubnet**, **delsubnet**, **modsubnet**, **showsubnet &mdash;** See [ndm Secondary Networks](https://github.com/gitbls/ndm#ndm-secondary-networks) below.
 
 ## Domain name behavior
 
@@ -345,9 +349,9 @@ As always, after a host configuration has been modified, do an `sudo ndm build` 
 
 ## Using the --bindoptions switch (bind9 only)
 
-ndm generates highly prescriptive configuration files. One of the bind configuration files, named.conf.options, has a section in it named *options*. These options are generated by ndm based on the supplied configuration.
+ndm generates highly prescriptive configuration files. One of the bind configuration files, named.conf.options, has a global section in it named *options*. These options are generated by ndm based on the supplied configuration.
 
-However, these options are a subset of all the options that bind supports. The `--bindoptions` switch lets you provide additional option lines for the *options* section. The `--bindoptions` switch takes an argument, which is a filename. The file contains a list of statements that are inserted into the *options* section.
+However, these options are a subset of all the options that bind supports. The `--bindoptions` switch lets you provide additional option lines for the global *options* section. The `--bindoptions` switch takes an argument, which is a filename. The file contains a list of statements that are inserted into the *options* section.
 
 ndm does NO syntax checking on these statements; They must be syntactically correct bind9 options statements, each ending with a semi-colon. They are inserted into the *options* section **as is**, except that ndm prepends 4 spaces to the lines if they do not start with 4 spaces. This is done for readability in named.conf.options.
 
@@ -378,11 +382,62 @@ The flags correspond to the command-line switches of the *add command*. When inc
 
 Once the network database has been successfully imported, do a `sudo ndm build` and `sudo ndm install`.
 
-## Using ndm with multiple LAN subnets or a VPN (bind only)
+## Using ndm with multiple network subnets or a VPN (bind only)
 
 By default, bind9 is configured to only accept requests from the host on which the name server is running, and any hosts in the subnet specified by --subnet. If you're using multiple LAN subnets or have a VPN installed that will use your DNS server for name services, you must specify the additional subnets using the `sudo ndm config --internals` command. 
 
 For instance, if my VPN provides client IP addresses in subnet 10.42.10.0/24, I would use `sudo ndm config --internals 10.42.10.0/24`, and ndm will add that subnet to the list of subnets allowed to query the name server.
+
+Also see the next section *ndm Secondary Networks*.
+
+## ndm Secondary Networks
+
+ndm has fully supported the primary LAN network on which ndm is running. Secondary networks are useful if the ndm/DNS/DHCP host has multiple network adapters on it, each in a different subnet. ndm can configure bind9 and isc-dhcp-server to support them as secondary network subnets. Hosts on secondary networks can be defined with all the same capabilities as hosts on the primary network.
+
+ndm enables secondary networks to make DNS requests from the DNS server, and enables the DHCP server to assign IP addresses in response to requests from hosts on a secondary network.
+
+ndm has 4 commands to define and manage secondary networks. 
+
+* `ndm addsubnet` &mdash; Add a new secondary subnet. The first argument specifies the secondary subnet (e.g., 192.168.44). At the moment only /24 networks are supported. Switches include:
+    * `--dhcpsubnet` *low-ip,high-ip* &mdash; Specify the range of IP addresses that can be allocated via DHCP in this subnet
+    * `--dns` *ip-address* mdash; Specify the IP address of the DNS server for this secondary subnet
+    * `--gateway` *ip-address* mdash; Specify the IP address of the gateway (router) for this secondary subnet
+    * `--myip` *ip-address* &mdash; Specify the IP address of this host in this secondary subnet
+    * `--name` *a-name* &mdash; Specify the name of the subnet. This is only for your reference, it is not used by ndm
+    * `--timeserver` *ip-address* mdash; Specify the IP address of the timeserver for this secondary subnet
+* `ndm delsubnet` &mdash; Delete the secondary subnet specified in the first argument
+* `ndm modsubnet` &mdash; Modify a defined secondary subnet. The first argument specifies the secondary subnet (e.g., 192.168.44) to modify.
+    * `--dhcpsubnet` *low-ip,high-ip* &mdash; Specify the updated range of IP addresses that can be allocated via DHCP in this subnet
+    * `--dns` *ip-address* mdash; Specify the IP address of the DNS server for this secondary subnet
+    * `--gateway` *ip-address* mdash; Specify the IP address of the gateway (router) for this secondary subnet
+    * `--myip` *ip-address* &mdash; Update the IP address of this host in this secondary subnet
+    * `--name` *a-name* &mdash; Update the name of the subnet. This is only for your reference, it is not used by ndm
+    * `--timeserver` *ip-address* mdash; Specify the IP address of the timeserver for this secondary subnet
+* `ndm showsubnet` &mdash; Display a list of defined secondary subnets, or a single subnet in the first argument
+
+In order for isc-dhcp-server to listen for requests on the additional network interfaces, sudo edit /etc/default/isc-dhcp-server to set the INTERFACESV4 setting to include the additional network devices. For instance, INTERFACESV4="eth0 eth1 eth2"
+
+It is strongly recommended that you enable predictable network names This will ensure that the network configuration remains correct regardless of which order the additional network adapters are found.
+
+ndm does nothing to configure the DNS Servers, gateways, and timeservers for secondary subnets on the actual network; these all need to be configured separately by you. In a simple configuration these can all be configured on the ndm/DNS/DHCP server if desired. Also, in order to properly build the configuration files, settings for *dhcpsubnet*, *dns*, *gateway*, *myip*, and *timeserver* must be set for each defined subnet.
+
+Secondary subnet information is kept in `/etc/dbndmsnet.json`. The file only exists if one or more secondary networks have been defined.
+
+## Changing the IP range of a network
+
+Imagine that your primary subnet is 192.168.1. Should you need to change the subnet for some reason (to 192.168.44, for example), you can use the `ndm resubnet` command. The `resubnet` command will:
+
+* Change all hosts defined in the original subnet to IP addresses in the new subnet. So, 192.168.1.4 would become 192.168.44.4, for example)
+* Update all subnet-related configuration details that refer to the original subnet: *dhcpsubnet*, *dnsip*, *gateway*, *internals*, *myip*, *subnet*, *timeserver*, and *dhcphostopts*
+* Update any dhcphostopt settings that refer to the original subnet
+
+The `resubnet` command can operate on subnets for either the primary network or a secondary network
+
+IMPORTANT NOTES:
+
+* The `resubnet` command does not make ANY changes to the system network configuration (IP addresses, etc). This must be done manually.
+* Strongly suggest that you verify all the changes THOROUGHLY. Check all the hosts and the `ndm config` output
+* This command only changes information in the ndm database. You still need to do an `ndm build` and `ndm install` to instantiate the changes into the running system. And you must orchestrate this with changing the system network configuration.
 
 ## Nameserver Failover
 
@@ -431,17 +486,17 @@ On the other hand, if you require 100% availability, that's not possible without
 
 This section is relatively old, and may be out of date.
 
-If you want to run ndm and bind/dhcpd on the same system as Pi-Hole, here are the steps. Basic testing has been done with both running on the same system. Pi-Hole generally encourages dnsmasq, so this is only recommended if you have a hankering for a fully transparent, DNS/DHCP subsystem that can be managed with command lines and scripts, rather than editing config files. It's all personal preference!
+If you want to run ndm and bind/dhcpd on the same system as Pi-Hole, here's how. Basic testing has been done with both running on the same system. Pi-Hole generally encourages dnsmasq, so this is only recommended if you have a hankering for a fully transparent, DNS/DHCP subsystem that can be managed with command lines and scripts, rather than editing config files. It's all personal preference!
 
 * Install and configure Pi-Hole per the Pi-Hole documentation
 * Install and configure bind, dhcpd, and ndm per this document
 * Modify the ndm configuration to use a different TCP port for DNS: `sudo ndm config --dnslistenport newport`. Pi-Hole will listen on port 53 (the default DNS port), so select another port less than 1024.
 * `sudo ndm build` and `sudo ndm install` the updated configuration
 * Configure any hosts with static IP address as documented above.
-* In the Pi-Hole configuration, establish an external DNS server: TBD
-* Test. Just like I need to do before this is released :)
+* In the Pi-Hole configuration, establish an external DNS server. See notes.
+* Test. 
 
-Things of note:
+### Pi-Hole configuration notes
 
 * Under piHole advanced DNS settings, clear the "never forward non-fqdns" and "never forward reverse-lookups for IP ranges". 
 * In PiHole specify the DNS server as 127.0.0.1#portnum or ipaddr#portnum (use a '#' to separate the IP address and port)
@@ -450,7 +505,11 @@ Things of note:
 
 ## Why use ndm and not Pi-Hole?
 
-Pi-Hole is a great system, and has a ton of features. It's a bit more complex than I prefer: I wanted a simple, lightweight, command-line oriented management utility. If you want a GUI, you should have a look at Pi-Hole.
+Pi-Hole is a great system, and has a ton of features. It's a bit more complex than I prefer: I wanted a simple, lightweight, command-line oriented management utility.
+
+If you prefer command lines and don't care about network-level ad blocking, use ndm.
+
+If you want a GUI or you want great network-level ad-blocking, use Pi-Hole.
 
 ## How do I choose betwen bind9/isc-dhcp-server and dnsmasq?
 
@@ -477,7 +536,7 @@ Known configuration issues:
 
 * /etc/resolv.conf changes unexpectedly on the ndm/DNS/DHCP server. This might occur if you are using dhcpcd or NetworkManager, and have established alternate network configurations. DNS and DHCP are server services, so the host running them should only have one network configuration, the static IP address. ndm updates /etc/resolvconf.conf so that everything works as expected, but if another subsystem modifies /etc/resolvconf.conf or /etc/resolv.conf, things could be "interesting".
 
-* If you need to ndm to reconfigure resolvconf: `sudo rm -f /etc/resolvconf.conf.ndm` will cause ndm to regenerate a correct /etc/resolvconf.conf. ndm also saves the original /etc/resolvconf.conf in /etc/resolvconf.conf-orig.ndm. The `resolvconf` program uses /etc/resolvconf.conf to generate /etc/resolv.conf. ndm runs resolvconf to generate the correct /etc/resolv.conf based on your ndm name server configuration.
+* If you need to have ndm to reconfigure resolvconf: `sudo rm -f /etc/resolvconf.conf.ndm` will cause ndm to regenerate a correct /etc/resolvconf.conf. ndm also saves the original /etc/resolvconf.conf in /etc/resolvconf.conf-orig.ndm. The `resolvconf` program uses /etc/resolvconf.conf to generate /etc/resolv.conf. ndm runs resolvconf to generate the correct /etc/resolv.conf based on your ndm name server configuration.
 
 ## Introducing a new DHCP Server onto the Network
 
