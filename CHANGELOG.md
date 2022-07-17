@@ -1,6 +1,13 @@
 # Changelog
 
 	
+## V2.12
+
+* Add `resubnet` command to reip an entire subnet. VERY useful if you need to reip your LAN. Also works with the new multiple subnets.
+* Multiple subnet support via new commands: addsubnet, delsubnet, showsubnet, and modsubnet. See README for details. 
+* Code improvements
+* Python 3.7 or later now required
+
 ## V2.11
 
 * Documentation and help corrections
