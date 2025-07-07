@@ -44,7 +44,7 @@ There are a few obvious enhancements that I think are needed. These include:
 * Only /24 networks are supported at the moment. This includes 192.168.n.* for any 'n'. 
 * IPV6 support
 * Service failover. Redunancy of critical services is a great idea, so may get implemented soon.
-* ndm is fully tested and supported on RasPiOS (Stretch and Buster) and Debian Bullseye. ndm needs to know the config directory/filenames for bind9, isc-dhcp-server, and/or dnsmasq, and some distros relocate these from their Debian-standard locations. If your distro doesn't work, let me know.
+* ndm is fully tested and supported on RasPiOS and Debian (Bookworm, Bullseye, Stretch and Buster). ndm needs to know the config directory/filenames for bind9, isc-dhcp-server, and/or dnsmasq, and some distros relocate these from their Debian-standard locations. If your distro doesn't work, let me know.
 * chroot configuration for the bind DNS server has been removed. Please let me know if this is important for you.
 
 ## Installation
@@ -574,12 +574,11 @@ This section includes a few notes on using ndm on various Linux distributions
 
 `ndm` currently supports the following OS Distros:
 
-* Raspbian Stretch
-* RasPiOS Buster
-* Debian Buster
-* Ubuntu (tested on 21.04, other releases *should* work as well)
+* RasPiOS Buster-Bookworm
+* Debian Buster-Bookworm
+* Ubuntu (not tested in a while, but it should still work)
 
-Any distro not listed above has not been tested and will not work. If your system is "Debian-like", you could try using `sudo ndm config --os debian`. It really depends on the distro, since the location of system configuration files can and does vary across distros. 
+Any distro not listed above has not been tested and will likely not work. If your system is "Debian-like", you could try using `sudo ndm config --os debian`. It really depends on the distro, since the location of system configuration files can and does vary across distros. 
 
 ### Other distros
 
