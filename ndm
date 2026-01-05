@@ -25,6 +25,7 @@ the DNS/DHCP configuration files and servers:
 
 import argparse
 import datetime
+import importlib
 import json
 import os
 import pwd
@@ -125,18 +126,18 @@ def dodiff(pd, fnm):
     return True
 
 def loadmodule(pd, modname, dnsordhcp):
-    # Loads modname and instantiates the class
-    # Done this way to avoid scoping issues
     try:
-        # Load the module
-        exec("from {} import ndm{}".format(modname, dnsordhcp))
-    except (ModuleNotFoundError, ImportError, Exception) as X:
-        perrorexit("? Error importing '{}' for {}\n  {}".format(modname,dnsordhcp.upper(), X))
-    # Instantiate the class ndm{dns|dhcp} into pd.{dns|dhcp}
-    try:
-        exec("pd.{} = ndm{}(pd)".format(dnsordhcp, dnsordhcp))
+        module = importlib.import_module(modname)
+        cls = getattr(module, f"ndm{dnsordhcp}")
     except Exception as X:
-        perrorexit("? Error instantiating class 'ndm{}' in file {} for {}\n {}".format(dnsordhcp, modname, dnsordhcp.upper(),X))
+        perrorexit(f"? Error importing '{modname}' for {dnsordhcp.upper()}\n  {X}")
+
+    try:
+        setattr(pd, dnsordhcp, cls(pd))
+    except Exception as X:
+        perrorexit(
+            f"? Error instantiating class 'ndm{dnsordhcp}' in file {modname} for {dnsordhcp.upper()}\n {X}"
+        )
 
 def  cknownos(pd):
     if not pd.db['cfg']['os'] in pd.knownos: perrorexit("? ndm doesn't support OS '{}' for this command\n 'sudo ndm config --os type' to set".format(pd.db['cfg']['os']))
@@ -187,7 +188,7 @@ class pdat:
 
     def _ckconfig(self):
         # OK if these VV options are not set. All others must be set
-        ignore = ['dhcpglobalinclude', 'dhcppoolinclude', 'dhcphostopt', 'dhcpglobalopt', 'hostfqdn', 'dnsip', 'blockdomains', 'bindoptions', 'subnetmask', 'dnsinclude', 'dhcpinclude', 'internals']
+        ignore = ['adrpz', 'adrpzwhite', 'adzone', 'dhcpglobalinclude', 'dhcppoolinclude', 'dhcphostopt', 'dhcpglobalopt', 'hostfqdn', 'dnsip', 'blockdomains', 'bindoptions', 'subnetmask', 'dnsinclude', 'dhcpinclude', 'failover', 'failpeer', 'internals']
         missing = ""
         for i in self.db['cfg']:
             if not i in ignore:
