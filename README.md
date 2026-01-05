@@ -574,8 +574,8 @@ This section includes a few notes on using ndm on various Linux distributions
 
 `ndm` currently supports the following OS Distros:
 
-* RasPiOS Buster-Bookworm
-* Debian Buster-Bookworm
+* RasPiOS Buster-Trixie
+* Debian Buster-Trixie
 * Ubuntu (not tested in a while, but it should still work)
 
 Any distro not listed above has not been tested and will likely not work. If your system is "Debian-like", you could try using `sudo ndm config --os debian`. It really depends on the distro, since the location of system configuration files can and does vary across distros. 
