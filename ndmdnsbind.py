@@ -233,7 +233,7 @@ class ndmdns():
         # NOT VETTED / TESTED in new config
         if os.path.isdir("/var/bind9/chroot"): self.pd.xperrorexit("? chroot appears to already be established")
         # Change /etc/default/bind9 OPTIONS="-u bind -t /var/bind9/chroot"
-        self.pd.xdosystem('sed -i \'s/OPTIONS="-u bind"/OPTIONS="-u bind -t \/var\/bind9\/chroot"/\' /etc/default/bind9')
+        #*** ??? self.pd.xdosystem('sed -i \'s/OPTIONS="-u bind"/OPTIONS="-u bind -t \/var\/bind9\/chroot"/\' /etc/default/bind9')
         for dir in [ "etc", "dev", "var/cache/bind", "var/run/named" ]:
             self.pd.xdosystem("mkdir -p /var/bind9/chroot/{}".format(dir))
         os.chmod("/var/bind9/chroot/etc", 0o2775)    # Needed for dynamic updates (.jnl files)
@@ -248,7 +248,7 @@ class ndmdns():
             self.pd.xdosystem("chmod 775 /var/bind9/chroot/var/{}; chgrp bind /var/bind9/chroot/var/{}".format(dir, dir))
         if os.path.isdir("/etc/rsyslog.d"):
             if not os.path.isfile("/etc/rsyslog.d/bind-chroot.conf"):
-                self.pd.xdosystem('echo "\$AddUnixListenSocket /var/bind9/chroot/dev/log" > /etc/rsyslog.d/bind-chroot.conf')
+                self.pd.xdosystem('echo "$AddUnixListenSocket /var/bind9/chroot/dev/log" > /etc/rsyslog.d/bind-chroot.conf')
         return True
 
     def _writezheader(self, fl, newdatesn, newftime, origin):
